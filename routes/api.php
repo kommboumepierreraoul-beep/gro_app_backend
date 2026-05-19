@@ -52,6 +52,11 @@ Route::middleware(['auth:sanctum', 'verified.email'])->prefix('auth')->group(fun
 });
 
 // =============================================================================
+//OAUTH ROUTES (Google, Facebook, etc.)
+// =============================================================================
+Route::get('/auth/google', [AuthController::class, 'redirect']);
+
+// =============================================================================
 // ADMIN ONLY (example — add your admin routes here)
 // =============================================================================
 
