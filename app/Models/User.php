@@ -56,6 +56,11 @@ class User extends Authenticatable implements MustVerifyEmail
         return $query->where('role', 'user');
     }
 
+    public function scopeFournisseurs($query)
+    {
+        return $query->where('role', 'fournisseur');
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -63,5 +68,13 @@ class User extends Authenticatable implements MustVerifyEmail
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+    public function isUser(): bool
+    {
+        return $this->role === 'user';
+    }
+    public function isFournisseur(): bool
+    {
+        return $this->role === 'fournisseur';
     }
 }
