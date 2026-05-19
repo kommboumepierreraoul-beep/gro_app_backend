@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
+use Laravel\Socialite\Facades\Socialite;
+
 
 class AuthController extends Controller
 {
@@ -459,5 +461,36 @@ class AuthController extends Controller
             'message' => $message,
             'error'   => config('app.debug') ? $e->getMessage() : 'An internal error occurred.',
         ], 500);
+    }
+
+    // OAuth via Google (bonus, non demandé) :
+
+    public function redirect()
+    {
+        return Socialite::driver('google')->stateless()->redirect();
+    }
+
+    public function callback()
+    {
+        $googleUser = Socialite::driver('google')
+            ->stateless()
+            ->user();
+
+        $user = User::updateOrCreate(
+            [
+                'email' => $googleUser->email
+            ],
+            [
+                'name' => $googleUser->name,
+                'google_id' => $googleUser->id,
+                'password' => bcrypt(Str::random(16))
+            ]
+        );
+
+        $token = $user->createToken('auth')->plainTextToken;
+
+        return redirect(
+            'http://localhost:3000/dashboard?token=' . $token
+        );
     }
 }
