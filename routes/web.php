@@ -8,6 +8,8 @@
 
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\api\AuthController;
+
 
 Route::get('/test-gmail', function () {
 
@@ -59,7 +61,12 @@ Route::get('/test-gmail', function () {
 Route::get('/test-brevo', function () {
     \Illuminate\Support\Facades\Mail::raw(
         '✅ Test Brevo SMTP OK depuis Laravel !',
-        fn($m) => $m->to('kommboumepierreraoul@gmail.com')->subject('Test Brevo')
+        fn($m) => $m->to('raoulkm2006@gmail.com')->subject('Test Brevo')
     );
     return 'Email envoyé !';
+});
+
+Route::get('/auth/google/callback', [AuthController::class, 'callback']);
+Route::get('/test-ssl', function () {
+    return file_get_contents('https://www.google.com');
 });
