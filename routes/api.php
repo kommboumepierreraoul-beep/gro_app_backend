@@ -58,3 +58,8 @@ Route::middleware(['auth:sanctum', 'verified.email'])->prefix('auth')->group(fun
 // Route::middleware(['auth:sanctum', 'verified.email', 'role:admin'])->prefix('admin')->group(function () {
 //     // ...
 // });
+
+//=============================================================================
+// IMPORT OTHER API ROUTES
+//=============================================================================
+require __DIR__.'/users/user.php';
