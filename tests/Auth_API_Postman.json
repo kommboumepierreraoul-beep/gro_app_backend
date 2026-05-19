@@ -1,0 +1,1022 @@
+{
+    "info": {
+        "name": "Auth API — Laravel Sanctum + Gmail",
+        "description": "Collection complète pour tester l'API d'authentification avec vérification email OTP.\n\n**Setup :**\n1. Importez cette collection dans Postman\n2. Créez un environnement avec les variables listées ci-dessous\n3. Lancez d'abord `Register User` — le token est sauvegardé automatiquement",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000/api",
+            "type": "string"
+        },
+        { "key": "token", "value": "", "type": "string" },
+        {
+            "key": "user_email",
+            "value": "testuser@gmail.com",
+            "type": "string"
+        },
+        { "key": "otp_code", "value": "", "type": "string" }
+    ],
+
+    "item": [
+        {
+            "name": "🔓 Auth Public",
+            "item": [
+                {
+                    "name": "Register User",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                                    "pm.test('success = true', () => pm.expect(res.success).to.be.true);",
+                                    "pm.test('Token présent', () => pm.expect(res.token).to.be.a('string'));",
+                                    "pm.test('User retourné', () => pm.expect(res.user).to.be.an('object'));",
+                                    "pm.test('email_verified_at est null', () => pm.expect(res.user.email_verified_at).to.be.null);",
+                                    "",
+                                    "if (res.token) {",
+                                    "    pm.collectionVariables.set('token', res.token);",
+                                    "    console.log('✅ Token sauvegardé :', res.token);",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Dupont\",\n  \"email\": \"{{user_email}}\",\n  \"password\": \"Password123!\",\n  \"password_confirmation\": \"Password123!\",\n  \"phone\": \"+237600000000\",\n  \"avatar\": \"https://example.com/avatar.png\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/register",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "register"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Register User — Email déjà utilisé (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('Erreur email unique', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.errors.email).to.exist;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"firstname\": \"Jean\",\n  \"lastname\": \"Dupont\",\n  \"email\": \"{{user_email}}\",\n  \"password\": \"Password123!\",\n  \"password_confirmation\": \"Password123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/register",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "register"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Register User — Validation manquante (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('Erreurs de validation présentes', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.false;",
+                                    "    pm.expect(res.errors).to.be.an('object');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"firstname\": \"\",\n  \"email\": \"pas-un-email\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/register",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "register"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Register Admin",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                                    "pm.test('Role = admin', () => pm.expect(res.user.role).to.eql('admin'));"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"firstname\": \"Super\",\n  \"lastname\": \"Admin\",\n  \"email\": \"admin@gmail.com\",\n  \"password\": \"Admin123!\",\n  \"password_confirmation\": \"Admin123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/register/admin",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "register", "admin"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Login — Succès",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => pm.expect(res.success).to.be.true);",
+                                    "pm.test('Token présent', () => pm.expect(res.token).to.be.a('string'));",
+                                    "pm.test('User retourné', () => pm.expect(res.user).to.be.an('object'));",
+                                    "",
+                                    "if (res.token) {",
+                                    "    pm.collectionVariables.set('token', res.token);",
+                                    "    console.log('✅ Token mis à jour');",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"Password123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/login",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "login"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Login — Mauvais mot de passe (401)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                                    "pm.test('Message erreur', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.false;",
+                                    "    pm.expect(res.message).to.include('Invalid');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"MauvaisMotDePasse!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/login",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "login"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Forgot Password — Envoyer le code",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.true;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"{{user_email}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/forgot-password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "forgot-password"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Forgot Password — Email inexistant (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('Erreur email', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.errors.email).to.exist;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"inexistant@gmail.com\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/forgot-password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "forgot-password"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Reset Password — Avec le code OTP",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.true;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"code\": \"{{otp_code}}\",\n  \"password\": \"NouveauPass123!\",\n  \"password_confirmation\": \"NouveauPass123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/reset-password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "reset-password"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Reset Password — Code invalide (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('Code invalide', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.false;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"code\": \"000000\",\n  \"password\": \"NouveauPass123!\",\n  \"password_confirmation\": \"NouveauPass123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/reset-password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "reset-password"]
+                        }
+                    }
+                }
+            ]
+        },
+
+        {
+            "name": "📧 Vérification Email",
+            "item": [
+                {
+                    "name": "Renvoyer le code OTP",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.true;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/email/resend",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "email", "resend"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Vérifier Email — Code correct",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => pm.expect(res.success).to.be.true);",
+                                    "pm.test('email_verified_at renseigné', () => {",
+                                    "    pm.expect(res.user.email_verified_at).to.not.be.null;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"code\": \"{{otp_code}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/email/verify",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "email", "verify"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Vérifier Email — Code invalide (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('success = false', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.false;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"code\": \"000000\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/email/verify",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "email", "verify"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Vérifier Email — Sans token (401)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"code\": \"123456\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/email/verify",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "email", "verify"]
+                        }
+                    }
+                }
+            ]
+        },
+
+        {
+            "name": "👤 Profil (auth + vérifié)",
+            "item": [
+                {
+                    "name": "Voir le profil",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => pm.expect(res.success).to.be.true);",
+                                    "pm.test('User contient firstname/lastname/email', () => {",
+                                    "    pm.expect(res.user.firstname).to.be.a('string');",
+                                    "    pm.expect(res.user.lastname).to.be.a('string');",
+                                    "    pm.expect(res.user.email).to.be.a('string');",
+                                    "});",
+                                    "pm.test('Password caché', () => pm.expect(res.user.password).to.be.undefined);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/profile",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "profile"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Voir le profil — Sans token (401)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/profile",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "profile"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Modifier le profil",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => pm.expect(res.success).to.be.true);",
+                                    "pm.test('Firstname mis à jour', () => pm.expect(res.user.firstname).to.eql('Jacques'));"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"firstname\": \"Jacques\",\n  \"lastname\": \"Martin\",\n  \"phone\": \"+237699999999\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/profile",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "profile"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Modifier le profil — Avatar invalide (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('Erreur avatar', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.errors.avatar).to.exist;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"avatar\": \"pas-une-url\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/profile",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "profile"]
+                        }
+                    }
+                }
+            ]
+        },
+
+        {
+            "name": "🔑 Mot de passe",
+            "item": [
+                {
+                    "name": "Changer le mot de passe — Succès",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => pm.expect(res.success).to.be.true);",
+                                    "pm.test('Nouveau token retourné', () => pm.expect(res.token).to.be.a('string'));",
+                                    "",
+                                    "if (res.token) {",
+                                    "    pm.collectionVariables.set('token', res.token);",
+                                    "    console.log('✅ Token mis à jour après changement de mot de passe');",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"current_password\": \"Password123!\",\n  \"password\": \"NouveauPass456!\",\n  \"password_confirmation\": \"NouveauPass456!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "password"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Changer le mot de passe — Ancien incorrect (401)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                                    "pm.test('Message erreur', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.message).to.include('incorrect');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"current_password\": \"MauvaisAncienPass!\",\n  \"password\": \"NouveauPass789!\",\n  \"password_confirmation\": \"NouveauPass789!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "password"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Changer le mot de passe — Confirmation ne correspond pas (422)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                                    "pm.test('Erreur confirmation', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.errors.password).to.exist;",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"current_password\": \"Password123!\",\n  \"password\": \"NouveauPass456!\",\n  \"password_confirmation\": \"PasPareil789!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/password",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "password"]
+                        }
+                    }
+                }
+            ]
+        },
+
+        {
+            "name": "🔄 Token",
+            "item": [
+                {
+                    "name": "Rafraîchir le token",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "const res = pm.response.json();",
+                                    "",
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('Nouveau token présent', () => pm.expect(res.token).to.be.a('string'));",
+                                    "",
+                                    "if (res.token) {",
+                                    "    pm.collectionVariables.set('token', res.token);",
+                                    "    console.log('✅ Token rafraîchi');",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/refresh",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "refresh"]
+                        }
+                    }
+                }
+            ]
+        },
+
+        {
+            "name": "🚪 Déconnexion",
+            "item": [
+                {
+                    "name": "Logout (token actuel)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.true;",
+                                    "});",
+                                    "",
+                                    "// Nettoyer le token local",
+                                    "pm.collectionVariables.set('token', '');"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/logout",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "logout"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Logout All (tous les appareils)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "pm.test('success = true', () => {",
+                                    "    const res = pm.response.json();",
+                                    "    pm.expect(res.success).to.be.true;",
+                                    "});",
+                                    "",
+                                    "pm.collectionVariables.set('token', '');"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/logout/all",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "logout", "all"]
+                        }
+                    }
+                },
+
+                {
+                    "name": "Logout — Token expiré/invalide (401)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Accept", "value": "application/json" },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer token_invalide_ici"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/auth/logout",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "logout"]
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}
