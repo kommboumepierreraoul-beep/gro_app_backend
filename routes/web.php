@@ -51,4 +51,15 @@ Route::get('/test-gmail', function () {
             },
         ], 500);
     }
+
+    
+});
+
+
+Route::get('/test-brevo', function () {
+    \Illuminate\Support\Facades\Mail::raw(
+        '✅ Test Brevo SMTP OK depuis Laravel !',
+        fn($m) => $m->to('kommboumepierreraoul@gmail.com')->subject('Test Brevo')
+    );
+    return 'Email envoyé !';
 });
