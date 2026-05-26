@@ -52,7 +52,6 @@ class AuthController extends Controller
             'email'     => 'required|email|unique:users,email',
             'password'  => ['required', 'confirmed', PasswordRule::defaults()],
             'phone'     => 'nullable|string|max:20',
-            'avatar'    => 'nullable|url',
         ]);
 
         if ($validator->fails()) {
@@ -66,7 +65,6 @@ class AuthController extends Controller
                 'email'             => $request->email,
                 'password'          => Hash::make($request->password),
                 'phone'             => $request->phone,
-                'avatar'            => $request->avatar,
                 'role'              => $role,
                 'email_verified_at' => null, // Not verified yet
             ]);
@@ -490,7 +488,7 @@ class AuthController extends Controller
         $token = $user->createToken('auth')->plainTextToken;
 
         return redirect(
-            'http://localhost:3000/dashboard?token=' . $token
+            'http://localhost:3000/community?token=' . $token
         );
     }
 }
