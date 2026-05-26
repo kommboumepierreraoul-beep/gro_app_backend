@@ -1,0 +1,47 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\{BelongsTo, MorphMany};
+
+class Announcement extends Model
+{
+    use SoftDeletes;
+
+    protected $fillable = [
+        'user_id',
+        'title',
+        'content',
+        'category',
+        'cover_image',
+        'expires_at',
+        'likes_count',
+    ];
+
+    protected $casts = ['expires_at' => 'datetime'];
+
+    public function author(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function likes(): MorphMany
+    {
+        return $this->morphMany(Like::class, 'likeable');
+    }
+
+    public function isLikedBy(int $userId): bool
+    {
+        return $this->likes()->where('user_id', $userId)->exists();
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->where(
+            fn($q) =>
+            $q->whereNull('expires_at')->orWhere('expires_at', '>', now())
+        );
+    }
+}
