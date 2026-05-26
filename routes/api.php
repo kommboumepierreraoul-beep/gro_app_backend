@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Route;
 // =============================================================================
 // PUBLIC ROUTES (no authentication required)
 // =============================================================================
-
 Route::prefix('auth')->group(function () {
 
     // Registration
@@ -56,6 +55,7 @@ Route::middleware(['auth:sanctum', 'verified.email'])->prefix('auth')->group(fun
 // =============================================================================
 Route::get('/auth/google', [AuthController::class, 'redirect']);
 
+
 // =============================================================================
 // ADMIN ONLY (example — add your admin routes here)
 // =============================================================================
@@ -68,3 +68,27 @@ Route::get('/auth/google', [AuthController::class, 'redirect']);
 // IMPORT OTHER API ROUTES
 //=============================================================================
 require __DIR__.'/users/user.php';
+require __DIR__.'/community/community.php';
+
+Route::get('/auth/google/callback', [AuthController::class, 'callback']);
+
+
+
+//Test Cors
+// routes/api.php
+Route::options('/{any}', function () {
+    return response()->json([], 200)
+        ->header('Access-Control-Allow-Origin', 'http://localhost:3000')
+        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-CSRF-TOKEN')
+        ->header('Access-Control-Allow-Credentials', 'true');
+})->where('any', '.*');
+
+// Route de test CORS
+Route::get('/cors-test', function () {
+    return response()->json([
+        'message' => 'CORS is working!',
+        'timestamp' => now(),
+        'headers' => request()->headers->all()
+    ]);
+});
