@@ -40,5 +40,11 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
+    'notchpay' => [
+    'public_key'   => env('NOTCHPAY_PUBLIC_KEY'),
+    'secret_key'   => env('NOTCHPAY_SECRET_KEY'),
+    'endpoint'     => env('NOTCHPAY_ENDPOINT', 'https://api.notchpay.co'),
+    'webhook_hash' => env('NOTCHPAY_WEBHOOK_HASH'),
+],
 
 ];

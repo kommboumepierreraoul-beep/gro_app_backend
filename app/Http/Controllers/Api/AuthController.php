@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\ActivityLog;
 use App\Notifications\EmailVerificationNotification;
 use App\Notifications\ResetPasswordNotification;
 use Illuminate\Auth\Events\Registered;
@@ -44,47 +45,63 @@ class AuthController extends Controller
     /**
      * Shared registration logic.
      */
-    private function register(Request $request, string $role): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'firstname' => 'required|string|max:255',
-            'lastname'  => 'required|string|max:255',
-            'email'     => 'required|email|unique:users,email',
-            'password'  => ['required', 'confirmed', PasswordRule::defaults()],
-            'phone'     => 'nullable|string|max:20',
+  private function register(Request $request, string $role): JsonResponse
+{
+    $validator = Validator::make($request->all(), [
+        'firstname' => 'required|string|max:255',
+        'lastname'  => 'required|string|max:255',
+        'email'     => 'required|email|unique:users,email',
+        'password'  => ['required', 'confirmed', PasswordRule::defaults()],
+        'phone'     => 'nullable|string|max:20',
+        'gender'    => 'nullable|string|in:male,female',
+    ]);
+
+    if ($validator->fails()) {
+        return $this->validationError($validator->errors());
+    }
+
+    try {
+        $user = User::create([
+            'firstname'         => $request->firstname,
+            'lastname'          => $request->lastname,
+            'email'             => $request->email,
+            'password'          => Hash::make($request->password),
+            'phone'             => $request->phone,
+            'role'              => $role,
+            'gender'            => $request->gender, // ✅ espace supprimé
+            'email_verified_at' => null,
         ]);
 
-        if ($validator->fails()) {
-            return $this->validationError($validator->errors());
-        }
+        // ✅ Créer le wallet automatiquement
+        $user->wallet()->create([
+            'balance'       => 0,
+            'total_credited'=> 0,
+            'total_debited' => 0,
+            'currency'      => 'XAF',
+        ]);
 
-        try {
-            $user = User::create([
-                'firstname'         => $request->firstname,
-                'lastname'          => $request->lastname,
-                'email'             => $request->email,
-                'password'          => Hash::make($request->password),
-                'phone'             => $request->phone,
-                'role'              => $role,
-                'email_verified_at' => null, // Not verified yet
-            ]);
+        $this->sendVerificationEmail($user);
 
-            // Fire the Registered event → triggers SendEmailVerificationNotification
-            // (or use our custom notification below)
-            $this->sendVerificationEmail($user);
+        ActivityLog::log(
+            'user_joined',
+            "{$user->firstname} {$user->lastname} a rejoint la plateforme",
+            'User',
+            $user->id
+        );
 
-            $token = $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createToken('auth_token')->plainTextToken;
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Registration successful. Please check your email to verify your account.',
-                'user'    => $user,
-                'token'   => $token,
-            ], 201);
-        } catch (\Exception $e) {
-            return $this->serverError('Registration failed', $e);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Registration successful. Please check your email to verify your account.',
+            'user'    => $user,
+            'token'   => $token,
+        ], 201);
+
+    } catch (\Exception $e) {
+        return $this->serverError('Registration failed', $e);
     }
+}
 
     // -------------------------------------------------------------------------
     // EMAIL VERIFICATION
@@ -463,7 +480,7 @@ class AuthController extends Controller
 
     // OAuth via Google (bonus, non demandé) :
 
-    public function redirect()
+    /*public function redirect()
     {
         return Socialite::driver('google')->stateless()->redirect();
     }
@@ -491,4 +508,5 @@ class AuthController extends Controller
             'http://localhost:3000/community?token=' . $token
         );
     }
+}*/
 }
