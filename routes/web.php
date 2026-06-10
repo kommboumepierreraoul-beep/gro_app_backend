@@ -9,6 +9,8 @@
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\api\AuthController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 
 Route::get('/test-gmail', function () {
@@ -69,4 +71,48 @@ Route::get('/test-brevo', function () {
 Route::get('/auth/google/callback', [AuthController::class, 'callback']);
 Route::get('/test-ssl', function () {
     return file_get_contents('https://www.google.com');
+});
+
+Route::get('/test-upload', function () {
+    return view('test-upload');
+});
+
+// Test d'upload - Route POST
+Route::post('/test-upload', function (Request $request) {
+    try {
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+
+            // Vérifier si le fichier est valide
+            if (!$file->isValid()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Fichier invalide'
+                ]);
+            }
+
+            // Stocker le fichier
+            $path = $file->store('test', 'public');
+
+            if ($path) {
+                $url = Storage::url($path);
+
+                return response()->json([
+                    'success' => true,
+                    'path' => $path,
+                    'url' => $url
+                ]);
+            }
+        }
+
+        return response()->json([
+            'success' => false,
+            'error' => 'Aucun fichier reçu'
+        ]);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]);
+    }
 });

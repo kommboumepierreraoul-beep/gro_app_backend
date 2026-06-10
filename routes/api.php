@@ -69,6 +69,8 @@ Route::get('/auth/google', [AuthController::class, 'redirect']);
 //=============================================================================
 require __DIR__.'/users/user.php';
 require __DIR__.'/community/community.php';
+require __DIR__ . '/AI/ai.php';
+require __DIR__ . '/mission/mission.php';
 
 Route::get('/auth/google/callback', [AuthController::class, 'callback']);
 
