@@ -13,9 +13,20 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 
-
 class PostController extends Controller
 {
+    private const ALLOWED_MIMES = [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'video/mp4',
+        'video/webm',
+        'video/quicktime',
+        'video/avi',
+        'application/pdf',
+    ];
+
     // ── Feed paginé ───────────────────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
@@ -32,51 +43,148 @@ class PostController extends Controller
     // ── Créer un post ─────────────────────────────────────────────────────────
     public function store(Request $request): JsonResponse
     {
-        Log::info('FILES:', $request->allFiles());
+
+        Log::info('=== STORE POST ===', [
+            'files'   => array_keys($request->allFiles()),
+            'content' => $request->content,
+            'type'    => $request->type,
+        ]);
+
+        // ── Validation minimale (pas de règle sur media) ──────────────────────
         $validator = Validator::make($request->all(), [
-            'content'        => 'required|string|max:5000',
-            'type'           => 'nullable|in:text,image,video,announcement,shared',
-            'media'          => 'nullable|array|max:5',
-            'media.*'        => 'file|mimes:jpg,jpeg,png,gif,mp4,mov|max:51200',
+            'content'        => 'nullable|string|max:5000',
+            'type'           => 'nullable|string|in:text,image,video,pdf,shared,announcement',
             'shared_post_id' => 'nullable|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        // ── Au moins content ou un fichier ────────────────────────────────────
+        $hasContent = !empty(trim($request->content ?? ''));
+        $hasFiles   = count($request->allFiles()) > 0;
+
+        if (!$hasContent && !$hasFiles && !$request->shared_post_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La publication doit contenir du texte ou un fichier.',
             ], 422);
         }
 
         DB::beginTransaction();
 
         try {
-            $mediaUrls = [];
+            $mediaUrls    = [];
+            $pdfFiles     = [];
+            $detectedType = 'text';
 
-            // ✅ UPLOAD FILES
-            if ($request->hasFile('media')) {
+            // ── Collecter les fichiers ────────────────────────────────────────
+            $uploaded = [];
+            $allFiles = $request->allFiles();
 
-                foreach ($request->file('media') as $file) {
-
-                    $path = $file->store('community/posts', 'public');
-
-                    $mediaUrls[] = Storage::url($path);
+            foreach ($allFiles as $key => $files) {
+                $files = is_array($files) ? $files : [$files];
+                foreach ($files as $file) {
+                    $uploaded[] = $file;
                 }
             }
 
-            // ✅ CREATE POST
+            Log::info('Fichiers collectés:', ['count' => count($uploaded)]);
+
+            // ── Uploader chaque fichier ───────────────────────────────────────
+            foreach ($uploaded as $index => $file) {
+                if (!$file || !$file->isValid()) {
+                    Log::warning("Fichier invalide à l'index $index");
+                    continue;
+                }
+
+                $mimeType = $file->getMimeType();
+                Log::info("Fichier $index:", ['name' => $file->getClientOriginalName(), 'mime' => $mimeType, 'size' => $file->getSize()]);
+
+                if (!in_array($mimeType, self::ALLOWED_MIMES)) {
+                    Log::warning("MIME non autorisé: $mimeType");
+                    continue;
+                }
+
+                $isImage = str_starts_with($mimeType, 'image/');
+                $isVideo = str_starts_with($mimeType, 'video/');
+                $isPdf   = $mimeType === 'application/pdf';
+
+                // Vérification taille
+                $maxBytes = $isVideo ? 200 * 1024 * 1024
+                    : ($isPdf  ? 20  * 1024 * 1024
+                        : 10  * 1024 * 1024);
+
+                if ($file->getSize() > $maxBytes) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Fichier \"{$file->getClientOriginalName()}\" trop volumineux.",
+                    ], 422);
+                }
+
+                $folder    = $isVideo ? 'community/videos'
+                    : ($isPdf  ? 'community/pdfs'
+                        : 'community/posts');
+
+                $extension = $file->getClientOriginalExtension() ?: 'bin';
+                $filename  = uniqid() . '_' . time() . '_' . $index . '.' . $extension;
+                $path      = $file->storeAs($folder, $filename, 'public');
+
+                if (!$path) {
+                    Log::error("Échec stockage fichier $index");
+                    continue;
+                }
+
+                $url = asset('storage/' . $path);
+
+                if ($isPdf) {
+                    $pdfFiles[] = [
+                        'url'        => $url,
+                        'name'       => $file->getClientOriginalName(),
+                        'size'       => $file->getSize(),
+                        'size_label' => $this->formatBytes($file->getSize()),
+                        'pages'      => null,
+                    ];
+                    if ($detectedType === 'text') $detectedType = 'pdf';
+                } else {
+                    $mediaUrls[] = $url;
+                    if ($detectedType === 'text') {
+                        $detectedType = $isVideo ? 'video' : 'image';
+                    }
+                }
+
+                Log::info("Fichier uploadé:", ['url' => $url, 'type' => $detectedType]);
+            }
+
+            // ── Type final ────────────────────────────────────────────────────
+            $postType = $request->type ?? $detectedType;
+            if ($postType === 'text' && (count($mediaUrls) > 0 || count($pdfFiles) > 0)) {
+                $postType = $detectedType;
+            }
+
+            // ── Création ──────────────────────────────────────────────────────
             $post = Post::create([
                 'user_id'        => $request->user()->id,
-                'content'        => $request->content,
-                'type'           => $request->type ?? 'text',
+                'content'        => trim($request->content ?? ''),
+                'type'           => $postType,
                 'media_urls'     => $mediaUrls,
+                'pdf_files'      => $pdfFiles,
                 'shared_post_id' => $request->shared_post_id,
+                'likes_count'    => 0,
+                'comments_count' => 0,
+                'shares_count'   => 0,
             ]);
 
             DB::commit();
 
-            // load relations
             $post->load(['author.profile', 'sharedPost.author']);
+
+            Log::info('Post créé:', ['id' => $post->id, 'type' => $postType]);
 
             return response()->json([
                 'success' => true,
@@ -85,10 +193,11 @@ class PostController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Erreur store post: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
 
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage(),
+                'message' => 'Erreur serveur: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -140,6 +249,18 @@ class PostController extends Controller
             return response()->json(['success' => false, 'message' => 'Action non autorisée.'], 403);
         }
 
+        // Supprimer les fichiers physiques
+        foreach (array_merge($post->media_urls ?? [], array_column($post->pdf_files ?? [], 'url')) as $url) {
+            try {
+                $path = str_replace('/storage/', '', parse_url($url, PHP_URL_PATH));
+                if ($path && Storage::disk('public')->exists($path)) {
+                    Storage::disk('public')->delete($path);
+                }
+            } catch (\Exception $e) {
+                Log::error('Erreur suppression fichier: ' . $e->getMessage());
+            }
+        }
+
         $post->delete();
 
         return response()->json(['success' => true, 'message' => 'Publication supprimée.']);
@@ -170,7 +291,6 @@ class PostController extends Controller
             $post->increment('likes_count');
             $liked = true;
 
-            // Notifier l'auteur (sauf si c'est lui-même)
             if ($post->user_id !== $user->id) {
                 CommunityNotification::create([
                     'user_id'         => $post->user_id,
@@ -203,7 +323,15 @@ class PostController extends Controller
         return response()->json(['success' => true, 'data' => $posts]);
     }
 
-    // ── Format de réponse unifié ──────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private function formatBytes(int $bytes): string
+    {
+        if ($bytes >= 1024 * 1024) return round($bytes / (1024 * 1024), 1) . ' Mo';
+        if ($bytes >= 1024)        return round($bytes / 1024, 1) . ' Ko';
+        return $bytes . ' o';
+    }
+
     private function formatPost(Post $post, int $authUserId): array
     {
         return [
@@ -211,8 +339,11 @@ class PostController extends Controller
             'content'        => $post->content,
             'type'           => $post->type,
             'media_urls'     => $post->media_urls ?? [],
+            'pdf_files'      => $post->pdf_files  ?? [],
             'author'         => $this->formatUser($post->author),
-            'shared_post'    => $post->sharedPost ? $this->formatPost($post->sharedPost, $authUserId) : null,
+            'shared_post'    => $post->sharedPost
+                ? $this->formatPost($post->sharedPost, $authUserId)
+                : null,
             'likes_count'    => $post->likes_count,
             'comments_count' => $post->comments_count,
             'shares_count'   => $post->shares_count,
@@ -224,6 +355,17 @@ class PostController extends Controller
 
     private function formatUser($user): array
     {
+        if (!$user) {
+            return [
+                'id'        => null,
+                'firstname' => 'Utilisateur',
+                'lastname'  => 'supprimé',
+                'avatar'    => null,
+                'headline'  => null,
+                'role'      => null,
+            ];
+        }
+
         return [
             'id'        => $user->id,
             'firstname' => $user->firstname,
