@@ -27,6 +27,7 @@ return new class extends Migration
 
             $table->json('media_urls')->nullable();
 
+
             $table->foreignId('shared_post_id')
                 ->nullable()
                 ->constrained('posts')
