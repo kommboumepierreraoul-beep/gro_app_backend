@@ -55,6 +55,7 @@ return [
         'User-Agent',
         'Cache-Control',
         'X-HTTP-Method-Override',
+        '*',
     ],
 
     'exposed_headers' => [],

@@ -41,4 +41,12 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
+    'deepseek' => [
+        'api_key'       => env('DEEPSEEK_API_KEY'),
+        'base_url'      => env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1'),
+        'default_model' => env('DEEPSEEK_DEFAULT_MODEL', 'deepseek-chat'),
+        'max_tokens'    => env('DEEPSEEK_MAX_TOKENS', 2048),
+        'temperature'   => env('DEEPSEEK_TEMPERATURE', 0.7),
+    ],
+
 ];
