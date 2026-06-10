@@ -80,7 +80,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function profile(): HasOne
     {
-        return $this->hasOne(UserProfile::class);
+        return $this->hasOne(UserProfile::class, 'user_id');
     }
 
     public function posts(): HasMany
@@ -197,5 +197,17 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->following()
             ->where('following_id', $user->id)
             ->exists();
+    }
+
+    public function missions()
+    {
+        return $this->hasMany(Mission::class, 'author_id');
+    }
+   
+
+    // Accesseur pour avatar
+    public function getAvatarAttribute()
+    {
+        return $this->profile?->avatar;
     }
 }

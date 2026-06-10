@@ -16,6 +16,9 @@ class Message extends Model
         'content',
         'media_url',
         'status',
+        'media_type',
+        'media_size',
+        'file_name'
     ];
 
     public function sender(): BelongsTo
