@@ -141,21 +141,21 @@ class MissionController extends Controller
     public function show(Request $request, string $ulid): MissionDetailResource
     {
         $mission = Mission::where('ulid', $ulid)
-            ->with([
-                'author' => function ($query) {
-                    $query->select('user:id', 'user:firstname')
-                        ->with('profile:id,user_id,avatar');
-                },
-                'category:id,name,slug,icon,color',
-                'reviews.reviewer' => function ($query) {
-                    $query->select('id', 'firstname')
-                        ->with('profile:id,user_id,avatar');
-                },
-            ])
-            ->withCount(['applications', 'applications as accepted_count' => function ($q) {
-                $q->where('status', 'accepted');
-            }])
-            ->firstOrFail();
+    ->with([
+        'author' => function($query) {
+            $query->select('id', 'firstname')
+                  ->with('profile:id,user_id,avatar');
+        },
+        'category:id,name,slug,icon,color',
+        'reviews.reviewer' => function($query) {
+            $query->select('id', 'firstname')
+                  ->with('profile:id,user_id,avatar');
+        },
+    ])
+    ->withCount(['applications', 'applications as accepted_count' => function ($q) {
+        $q->where('status', 'accepted');
+    }])
+    ->firstOrFail();
 
         // Enregistrer la vue en asynchrone
         RecordMissionViewJob::dispatch(
