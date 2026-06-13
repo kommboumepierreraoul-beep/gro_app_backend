@@ -145,5 +145,13 @@ public function transactions()
     return $this->hasMany(Transaction::class);
     
 }
+public function walletTransactions() { return $this->hasMany(WalletTransaction::class); }
 
+// Au lieu de return $this->wallet_balance;
+public function getWalletBalanceAttribute()
+{
+    return $this->wallet ? $this->wallet->balance : 0;
 }
+}
+
+

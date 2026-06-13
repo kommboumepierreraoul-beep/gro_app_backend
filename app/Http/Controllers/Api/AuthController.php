@@ -133,35 +133,35 @@ class AuthController extends Controller
      * Verify email with the OTP code sent by email.
      */
     public function verifyEmail(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'code' => 'required|digits:6',
-        ]);
+{
+    $validator = Validator::make($request->all(), [
+        'code' => 'required|digits:6',
+    ]);
 
-        if ($validator->fails()) {
-            return $this->validationError($validator->errors());
-        }
-
-        $user      = $request->user();
-        $cacheKey  = $this->otpCacheKey($user->id);
-        $cached    = Cache::get($cacheKey);
-
-        if (!$cached || $cached['code'] !== $request->code) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid or expired verification code.',
-            ], 422);
-        }
-
-        $user->markEmailAsVerified();
-        Cache::forget($cacheKey);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Email verified successfully.',
-            'user'    => $user,
-        ]);
+    if ($validator->fails()) {
+        return $this->validationError($validator->errors());
     }
+
+    $user     = $request->user();
+    $cacheKey = $this->otpCacheKey($user->id);
+    $cached   = Cache::get($cacheKey);
+
+    if (!$cached || $cached['code'] !== $request->code) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Invalid or expired verification code.',
+        ], 422);
+    }
+
+    $user->markEmailAsVerified();
+    Cache::forget($cacheKey);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Email verified successfully.',
+        //'user'    => $user->fresh(), // ← recharge sans l'attribut wallet_balance
+    ]);
+}
 
     //
 

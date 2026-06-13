@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Order;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -13,7 +14,7 @@ class NotchpayWebhookController extends Controller
     {
         Log::info('Notch Pay Webhook reçu', ['payload' => $request->all()]);
 
-        $event = $request->input('event') ?? $request->input('type');
+        $event     = $request->input('event') ?? $request->input('type');
         $eventData = $request->input('data', []);
 
         switch ($event) {
@@ -36,13 +37,43 @@ class NotchpayWebhookController extends Controller
 
     private function handlePaymentComplete(array $data): void
     {
-        $reference = $data['merchant_reference'] ?? $data['trxref'] ?? null;
+        $reference = $data['merchant_reference'] ?? $data['reference'] ?? $data['trxref'] ?? null;
+
+        Log::info('handlePaymentComplete', ['reference' => $reference, 'data' => $data]);
+
         if (!$reference) {
             Log::error('Notch Pay : Référence manquante dans payment.complete');
             return;
         }
 
+        // ✅ CAS 1 : C'est un paiement de commande (reference = ORD-XXXXXXXX)
+        if (str_starts_with($reference, 'ORD-')) {
+            $order = Order::where('order_number', $reference)->first();
+
+            if (!$order) {
+                Log::error('Notch Pay : Commande non trouvée', ['reference' => $reference]);
+                return;
+            }
+
+            if ($order->status !== 'pending') {
+                Log::info('Notch Pay : Commande déjà traitée', ['reference' => $reference]);
+                return;
+            }
+
+            $order->update(['status' => 'paid']);
+
+            Log::info('Commande payée via Notch Pay', [
+                'order_id'     => $order->id,
+                'order_number' => $order->order_number,
+                'amount'       => $order->total_amount,
+            ]);
+
+            return;
+        }
+
+        // ✅ CAS 2 : C'est un dépôt wallet (reference = TRX-XXXXXXXX)
         $transaction = Transaction::where('reference', $reference)->first();
+
         if (!$transaction) {
             Log::error('Notch Pay : Transaction non trouvée', ['reference' => $reference]);
             return;
@@ -56,79 +87,50 @@ class NotchpayWebhookController extends Controller
         $wallet = $transaction->wallet;
 
         if ($transaction->type === 'credit') {
-            $wallet->balance += $transaction->amount;
-            $wallet->total_credited += $transaction->amount;
+            $wallet->balance         += $transaction->amount;
+            $wallet->total_credited  += $transaction->amount;
             $wallet->save();
 
             $transaction->update([
-                'status' => 'completed',
+                'status'         => 'completed',
                 'balance_before' => $wallet->balance - $transaction->amount,
-                'balance_after' => $wallet->balance,
-                'completed_at' => now(),
+                'balance_after'  => $wallet->balance,
+                'completed_at'   => now(),
                 'payment_method' => 'notchpay',
-                'metadata' => array_merge($transaction->metadata ?? [], [
+                'metadata'       => array_merge($transaction->metadata ?? [], [
                     'notchpay_data' => $data,
-                    'processed_at' => now(),
+                    'processed_at'  => now(),
                 ]),
             ]);
 
             Log::info('Wallet crédité via Notch Pay', [
-                'user_id' => $transaction->user_id,
-                'amount' => $transaction->amount,
+                'user_id'     => $transaction->user_id,
+                'amount'      => $transaction->amount,
                 'new_balance' => $wallet->balance,
             ]);
-        }
-
-        if ($transaction->type === 'debit') {
-            $wallet->balance -= $transaction->amount;
-            $wallet->total_debited += $transaction->amount;
-            $wallet->save();
-
-            $transaction->update([
-                'status' => 'completed',
-                'balance_before' => $wallet->balance + $transaction->amount,
-                'balance_after' => $wallet->balance,
-                'completed_at' => now(),
-                'payment_method' => 'notchpay',
-                'metadata' => array_merge($transaction->metadata ?? [], [
-                    'notchpay_data' => $data,
-                    'processed_at' => now(),
-                ]),
-            ]);
-
-            $metadata = $transaction->metadata ?? [];
-            $orderId = $metadata['order_id'] ?? null;
-            if ($orderId) {
-                \App\Models\Order::where('id', $orderId)
-                    ->where('status', 'pending')
-                    ->update(['status' => 'paid']);
-                Log::info('Commande payée via Notch Pay', [
-                    'order_id' => $orderId,
-                    'amount' => $transaction->amount,
-                ]);
-            }
         }
     }
 
     private function handlePaymentFailed(array $data): void
     {
-        $reference = $data['merchant_reference'] ?? $data['trxref'] ?? null;
+        $reference = $data['merchant_reference'] ?? $data['reference'] ?? $data['trxref'] ?? null;
+
         if (!$reference) {
             Log::error('Notch Pay : Référence manquante dans payment.failed');
             return;
         }
 
+        // Commande échouée
+        if (str_starts_with($reference, 'ORD-')) {
+            Log::warning('Paiement commande échoué', ['reference' => $reference]);
+            return;
+        }
+
+        // Transaction wallet échouée
         Transaction::where('reference', $reference)
             ->where('status', 'pending')
             ->update(['status' => 'failed']);
 
         Log::warning('Paiement Notch Pay échoué', ['reference' => $reference]);
-    }
-
-    private function verifySignature(string $payload, ?string $signature, string $hashKey): bool
-    {
-        if (!$signature) return false;
-        $expectedSignature = hash_hmac('sha256', $payload, $hashKey);
-        return hash_equals($expectedSignature, $signature);
     }
 }
