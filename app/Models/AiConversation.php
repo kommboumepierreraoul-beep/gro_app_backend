@@ -2,32 +2,32 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
-/**
- * Conversation IA d'un utilisateur.
- *
- * @property int         $id
- * @property int         $user_id
- * @property string      $session_id   UUID unique par session
- * @property string|null $title        Titre auto-généré depuis le 1er message
- * @property \Carbon\Carbon $created_at
- * @property \Carbon\Carbon $updated_at
- */
 class AiConversation extends Model
 {
-    use HasFactory;
+    use HasUuids, SoftDeletes;
 
     protected $fillable = [
         'user_id',
-        'session_id',
         'title',
+        'model',
+        'context_type',
+        'context_id',
+        'total_tokens',
+        'message_count',
+        'meta',
     ];
 
-    // ─── Relations ───────────────────────────────────────────
+    protected $casts = [
+        'meta' => 'array',
+        'total_tokens' => 'integer',
+        'message_count' => 'integer',
+    ];
 
     public function user(): BelongsTo
     {
@@ -36,16 +36,80 @@ class AiConversation extends Model
 
     public function messages(): HasMany
     {
-        return $this->hasMany(AiMessage::class, 'conversation_id')->orderBy('created_at');
+        return $this->hasMany(AiMessage::class, 'conversation_id')
+            ->orderBy('position');
     }
 
-    // ─── Scopes ──────────────────────────────────────────────
-
-    /**
-     * Conversations d'un utilisateur, plus récentes en premier.
-     */
-    public function scopeForUser($query, int $userId)
+    public function contextWindowMessages(int $limit = 20)
     {
-        return $query->where('user_id', $userId)->orderByDesc('updated_at');
+        return $this->messages()
+            ->where('in_context_window', true)
+            ->latest('position')
+            ->limit($limit)
+            ->get()
+            ->reverse()
+            ->values();
+    }
+
+    public function toApiMessages(int $windowSize = 20): array
+    {
+        return $this->contextWindowMessages($windowSize)
+            ->map(fn(AiMessage $msg) => [
+                'role'    => $msg->role,
+                'content' => $msg->content,
+            ])
+            ->toArray();
+    }
+
+    public function getContextData(): array
+    {
+        $data = [];
+
+        switch ($this->context_type) {
+            case 'post':
+                if ($this->context_id && class_exists(Post::class)) {
+                    $post = Post::find($this->context_id);
+                    if ($post) {
+                        $data['post'] = [
+                            'id' => $post->id,
+                            'title' => $post->title,
+                            'content' => $post->content,
+                            'user_id' => $post->user_id,
+                            'created_at' => $post->created_at,
+                        ];
+                    }
+                }
+                break;
+            case 'mission':
+                if ($this->context_id && class_exists(Mission::class)) {
+                    $mission = Mission::find($this->context_id);
+                    if ($mission) {
+                        $data['mission'] = [
+                            'id' => $mission->id,
+                            'title' => $mission->title,
+                            'description' => $mission->description,
+                            'user_id' => $mission->user_id,
+                            'created_at' => $mission->created_at,
+                        ];
+                    }
+                }
+                break;
+            case 'comment':
+                if ($this->context_id && class_exists(Comment::class)) {
+                    $comment = Comment::find($this->context_id);
+                    if ($comment) {
+                        $data['comment'] = [
+                            'id' => $comment->id,
+                            'content' => $comment->content,
+                            'user_id' => $comment->user_id,
+                            'post_id' => $comment->post_id,
+                            'created_at' => $comment->created_at,
+                        ];
+                    }
+                }
+                break;
+        }
+
+        return $data;
     }
 }
