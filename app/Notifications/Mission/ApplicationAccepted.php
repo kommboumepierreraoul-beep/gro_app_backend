@@ -55,8 +55,8 @@ class ApplicationAccepted extends Notification implements ShouldQueue
         }
 
         return $mail
-            ->action('Voir la mission', url("/missions/{$mission->ulid}"))
-            ->line('Bonne chance et bonne mission avec GRO ! 🌱');
+            ->action('Voir la mission', url("http://localhost:3000/missions/{$mission->ulid}"))
+            ->line('Bonne chance et bonne mission avec AgriPulse ! 🌱');
     }
 
     public function toArray($notifiable): array
@@ -65,7 +65,7 @@ class ApplicationAccepted extends Notification implements ShouldQueue
             'type'          => 'application_accepted',
             'mission_ulid'  => $this->application->mission->ulid,
             'mission_title' => $this->application->mission->title,
-            'url'           => "/missions/{$this->application->mission->ulid}",
+            'url'           => "http://localhost:3000/missions/{$this->application->mission->ulid}",
         ];
     }
 
