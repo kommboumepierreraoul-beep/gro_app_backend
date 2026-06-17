@@ -6,6 +6,7 @@
 use App\Http\Controllers\Api\Mission\MissionController;
 use App\Http\Controllers\Api\Mission\MissionApplicationController;
 use App\Http\Controllers\Api\Mission\MissionReviewController;
+use App\Http\Controllers\Api\Mission\MissionReportController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -42,6 +43,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::prefix('/{ulid}/reviews')->name('reviews.')->group(function () {
             Route::get('/',   [MissionReviewController::class, 'index'])->name('index');
             Route::post('/',  [MissionReviewController::class, 'store'])->name('store');
+        });
+
+        // Signalements
+        Route::prefix('/{ulid}/report')->name('report.')->group(function () {
+            Route::get('/',  [MissionReportController::class, 'check'])->name('check');
+            Route::post('/', [MissionReportController::class, 'store'])->name('store');
         });
     });
 
