@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Mission;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Mission\StoreMissionApplicationRequest;
 use App\Models\Mission;
 use App\Models\MissionApplication;
 use App\Models\MissionReminder;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class MissionApplicationController extends Controller
 {
@@ -25,100 +27,73 @@ class MissionApplicationController extends Controller
      *   form_responses    json    optionnel  {"q1": true, "q2": "valeur"}
      *   motivation        string  optionnel
      *   attachments[]     file[]  optionnel  (max 5 Mo chacun, types autorisés)
+     *
+     * Toute la validation métier (mission ouverte, pas déjà candidat,
+     * champs requis du formulaire, pièces jointes autorisées, etc.)
+     * est centralisée dans StoreMissionApplicationRequest.
+     *
+     * Flux email déclenché :
+     *   → NewApplicationReceived (mail + database) envoyé à l'AUTEUR
+     *     via App\Mail\NewApplicationMail (template emails.missions.new-application)
      */
-    public function store(Request $request): JsonResponse
+    public function store(StoreMissionApplicationRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'mission_ulid'   => 'required|string',
-            'method'         => 'required|in:form,app_message,whatsapp,email',
-            'form_responses' => 'nullable|string', // JSON string depuis FormData
-            'motivation'     => 'nullable|string|max:2000',
-            'attachments'    => 'nullable|array|max:5',
-            'attachments.*'  => [
-                'file',
-                'max:5120', // 5 Mo
-                'mimes:jpg,jpeg,png,pdf,doc,docx',
-            ],
-        ]);
+        $mission       = $request->getMission();
+        $formResponses = $request->getFormResponses();
+        $user          = $request->user();
 
-        // Récupérer la mission
-        $mission = Mission::where('ulid', $data['mission_ulid'])
-            ->with('author')
-            ->firstOrFail();
-
-        // Vérifications métier
-        abort_if(
-            !$mission->isOpen(),
-            422,
-            'Cette mission n\'accepte plus de candidatures.'
-        );
-
-        abort_if(
-            $mission->isOwnedBy($request->user()),
-            422,
-            'Vous ne pouvez pas postuler à votre propre mission.'
-        );
-
-        // Vérifier si déjà candidat (hors withdrawn)
-        $existing = MissionApplication::where('mission_id', $mission->id)
-            ->where('applicant_id', $request->user()->id)
-            ->whereNotIn('status', [MissionApplication::STATUS_WITHDRAWN])
-            ->first();
-
-        abort_if($existing, 422, 'Vous avez déjà postulé à cette mission.');
-
-        // Valider les réponses au formulaire de l'auteur
-        $formResponses = [];
-        if ($data['form_responses'] ?? null) {
-            $formResponses = json_decode($data['form_responses'], true) ?? [];
-            $this->validateFormResponses($mission, $formResponses);
-        }
-
-        // Upload des pièces jointes
+        // Upload des pièces jointes (hors transaction : I/O fichier)
         $attachmentPaths = [];
         if ($request->hasFile('attachments')) {
-            abort_if(
-                !$mission->allow_attachments,
-                422,
-                'Cette mission n\'accepte pas de pièces jointes.'
-            );
-
             foreach ($request->file('attachments') as $file) {
-                $path = $file->store(
-                    "missions/{$mission->ulid}/attachments/{$request->user()->id}",
+                $attachmentPaths[] = $file->store(
+                    "missions/{$mission->ulid}/attachments/{$user->id}",
                     'public'
                 );
-                $attachmentPaths[] = $path;
             }
         }
 
-        // Créer ou réactiver la candidature (si précédemment withdrawn)
-        $application = MissionApplication::updateOrCreate(
-            [
-                'mission_id'   => $mission->id,
-                'applicant_id' => $request->user()->id,
-            ],
-            [
-                'method'           => $data['method'],
-                'form_responses'   => $formResponses,
-                'motivation'       => $data['motivation'] ?? null,
-                'attachment_paths' => $attachmentPaths,
-                'status'           => MissionApplication::STATUS_PENDING,
-                'withdrawn_at'     => null,
-                'rejected_at'      => null,
-                'accepted_at'      => null,
-                'rejection_reason' => null,
-                'author_note'      => null,
-            ]
-        );
+        try {
+            $application = DB::transaction(function () use ($request, $mission, $user, $formResponses, $attachmentPaths) {
+                // Créer ou réactiver la candidature (si précédemment withdrawn)
+                $application = MissionApplication::updateOrCreate(
+                    [
+                        'mission_id'   => $mission->id,
+                        'applicant_id' => $user->id,
+                    ],
+                    [
+                        'method'           => $request->input('method'),
+                        'form_responses'   => $formResponses,
+                        'motivation'       => $request->input('motivation'),
+                        'attachment_paths' => $attachmentPaths,
+                        'status'           => MissionApplication::STATUS_PENDING,
+                        'withdrawn_at'     => null,
+                        'rejected_at'      => null,
+                        'accepted_at'      => null,
+                        'rejection_reason' => null,
+                        'author_note'      => null,
+                    ]
+                );
 
-        // Notifier l'auteur
-        $mission->author->notify(new NewApplicationReceived($application->load('applicant')));
+                // Planifier les rappels si start_date défini
+                if ($mission->start_date) {
+                    $this->scheduleReminders($application);
+                }
 
-        // Planifier les rappels si start_date défini
-        if ($mission->start_date) {
-            $this->scheduleReminders($application);
+                return $application;
+            });
+        } catch (\Throwable $e) {
+            // Rollback fichiers uploadés si la transaction échoue
+            foreach ($attachmentPaths as $path) {
+                Storage::disk('public')->delete($path);
+            }
+            Log::error("Erreur création candidature mission #{$mission->id} : {$e->getMessage()}");
+            abort(500, 'Une erreur est survenue lors de l\'envoi de votre candidature.');
         }
+
+        // ── Notifier l'auteur (email + in-app) ──────────────────────────────
+        // → envoie NewApplicationMail à $mission->author->email
+        $mission->author->notify(new NewApplicationReceived($application->load(['applicant', 'mission.category'])));
 
         return response()->json([
             'message' => 'Candidature envoyée avec succès.',
@@ -143,10 +118,32 @@ class MissionApplicationController extends Controller
             ->firstOrFail();
 
         $query = $mission->applications()
-            ->with(['applicant' => function ($query) {
-                $query->select('id', 'firstname', 'email')
-                    ->with('profile');  // Charge le profile avec l'avatar
-            }])
+            ->with([
+                'applicant' => function ($query) {
+                    $query->select('id', 'firstname', 'lastname', 'email')
+                        ->with(['profile:id,user_id,avatar']);
+                },
+                'mission' => function ($query) {
+                    $query->select(
+                        'id',
+                        'ulid',
+                        'title',
+                        'status',
+                        'start_date',
+                        'location_label',
+                        'remuneration_type',
+                        'remuneration_amount',
+                        'remuneration_currency',
+                        'category_id',
+                        'author_id'
+                    )
+                        ->with(['category:id,name,slug,icon,color'])
+                        ->with(['author' => function ($q) {
+                            $q->select('id', 'firstname', 'lastname', 'email')
+                                ->with(['profile:id,user_id,avatar']);
+                        }]);
+                },
+            ])
             ->orderByDesc('created_at');
 
         if ($request->filled('status')) {
@@ -154,8 +151,23 @@ class MissionApplicationController extends Controller
         }
 
         $perPage = $request->integer('per_page', 20);
-
         $applications = $query->paginate($perPage);
+
+        // Transformer les données pour inclure l'avatar
+        $applications->getCollection()->transform(function ($application) {
+            if ($application->applicant && $application->applicant->profile) {
+                $application->applicant->avatar = $application->applicant->profile->avatar;
+                unset($application->applicant->profile);
+            }
+            if ($application->mission && $application->mission->author) {
+                $author = $application->mission->author;
+                if ($author->profile) {
+                    $author->avatar = $author->profile->avatar;
+                }
+                unset($author->profile);
+            }
+            return $application;
+        });
 
         // Stats agrégées
         $stats = $mission->applications()
@@ -183,6 +195,10 @@ class MissionApplicationController extends Controller
 
     /**
      * PATCH /api/missions/{ulid}/applications/{appId}/accept
+     *
+     * Flux email déclenché :
+     *   → ApplicationAccepted (mail + database + fcm) envoyé au CANDIDAT
+     *     via App\Mail\ApplicationAcceptedMail (template emails.missions.application-accepted)
      */
     public function accept(Request $request, string $ulid, int $appId): JsonResponse
     {
@@ -193,8 +209,10 @@ class MissionApplicationController extends Controller
         $application = $mission->applications()
             ->where('id', $appId)
             ->where('status', MissionApplication::STATUS_PENDING)
+            ->with(['applicant', 'mission.author'])
             ->firstOrFail();
 
+        // accept() met à jour le statut ET notifie le candidat (email + in-app)
         $application->accept();
 
         // Vérifier si la mission est pleine → passer à filled
@@ -217,6 +235,10 @@ class MissionApplicationController extends Controller
     /**
      * PATCH /api/missions/{ulid}/applications/{appId}/reject
      * Body: { reason?: string }
+     *
+     * Flux email déclenché :
+     *   → ApplicationRejected (mail + database) envoyé au CANDIDAT
+     *     via App\Mail\ApplicationRejectedMail (template emails.missions.application-rejected)
      */
     public function reject(Request $request, string $ulid, int $appId): JsonResponse
     {
@@ -232,8 +254,10 @@ class MissionApplicationController extends Controller
                 MissionApplication::STATUS_PENDING,
                 MissionApplication::STATUS_ACCEPTED,
             ])
+            ->with(['applicant', 'mission'])
             ->firstOrFail();
 
+        // reject() met à jour le statut ET notifie le candidat (email + in-app)
         $application->reject($request->reason);
 
         // Si la mission était filled et qu'on retire un accepté → republier
@@ -287,7 +311,7 @@ class MissionApplicationController extends Controller
             ->with([
                 'mission:id,ulid,title,status,start_date,location_label,remuneration_type,remuneration_amount,remuneration_currency',
                 'mission.category:id,name,slug,icon,color',
-                'mission.author:id,firstname,avatar',  // avatar vient de l'accesseur
+                'mission.author:id,name,avatar',
             ])
             ->orderByDesc('created_at');
 
@@ -333,17 +357,6 @@ class MissionApplicationController extends Controller
 
     // ── Utilitaires ───────────────────────────────────────────────────────
 
-    /**
-     * Valider les réponses du candidat par rapport au formulaire défini par l'auteur.
-     */
-    private function validateFormResponses(Mission $mission, array $responses): void
-    {
-        foreach ($mission->application_form ?? [] as $field) {
-            if (($field['required'] ?? false) && empty($responses[$field['id']])) {
-                abort(422, "Le champ \"{$field['label']}\" est requis.");
-            }
-        }
-    }
 
     /**
      * Planifier les rappels automatiques pour un candidat accepté.

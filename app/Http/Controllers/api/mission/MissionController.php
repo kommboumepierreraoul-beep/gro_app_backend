@@ -399,7 +399,10 @@ class MissionController extends Controller
         ]);
 
         $query = Mission::forAuthor($request->user()->id)
-            ->with(['category:id,name,slug,icon,color'])
+            ->with([
+                'category:id,name,slug,icon,color',
+                'author:id'
+            ])
             ->withCount(['applications', 'applications as pending_count' => function ($q) {
                 $q->where('status', 'pending');
             }])
@@ -408,6 +411,7 @@ class MissionController extends Controller
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
+        
 
         return MissionResource::collection($query->paginate($request->integer('per_page', 15)));
     }
