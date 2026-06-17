@@ -1,42 +1,37 @@
 <?php
-// app/Providers/AppServiceProvider.php
 
 namespace App\Providers;
 
-use App\Models\Post;
-use App\Observers\PostObserver;
-use App\Services\AI\ConversationService;
-use App\Services\AI\DeepSeekService;
-use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void
-    {
-        // Enregistrement des services IA en singleton
-        // (le client Guzzle est instancié une seule fois par requête)
-        $this->app->singleton(DeepSeekService::class);
-        $this->app->singleton(ConversationService::class);
-    }
-
     public function boot(): void
     {
-        // ── Observers ─────────────────────────────────────────
-        Post::observe(PostObserver::class);
+        // ✅ Enregistrer la règle de validation exists_with
+        Validator::extend('exists_with', function ($attribute, $value, $parameters, $validator) {
+            $contextType = $validator->getData()['context_type'] ?? null;
 
-        // ── Rate Limiters ──────────────────────────────────────
-        RateLimiter::for('ai', function (Request $request) {
-            $userId = $request->user()?->id ?? $request->ip();
+            if (empty($contextType)) {
+                return true; // Pas de contexte = pas de validation
+            }
 
-            return [
-                // 20 requêtes par minute par utilisateur
-                Limit::perMinute(20)->by("ai_min_{$userId}"),
-                // 500 requêtes par jour par utilisateur
-                Limit::perDay(500)->by("ai_day_{$userId}"),
+            // ✅ Vérifier que le modèle existe avant de l'utiliser
+            $modelMap = [
+                'post' => \App\Models\Post::class,
+                'comment' => \App\Models\Comment::class,
+                // ✅ Supprimer 'thread' si le modèle n'existe pas
+                // 'thread' => \App\Models\Thread::class,
             ];
+
+            $model = $modelMap[$contextType] ?? null;
+
+            if (!$model || !class_exists($model)) {
+                return true; // Type inconnu ou modèle inexistant = pas de validation
+            }
+
+            return $model::where('id', $value)->exists();
         });
     }
 }

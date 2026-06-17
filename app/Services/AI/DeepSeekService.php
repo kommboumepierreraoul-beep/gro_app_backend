@@ -2,394 +2,443 @@
 
 namespace App\Services\AI;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Exception\RequestException;
-use GuzzleHttp\Exception\ServerException;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
-/**
- * Service principal d'interaction avec l'API DeepSeek.
- *
- * Responsabilités :
- *  - Appels chat (réponse complète ou streaming SSE)
- *  - Modération de contenu
- *  - Génération de tags
- *  - Résumé de discussions
- *  - Amélioration de posts
- */
 class DeepSeekService
 {
-    private Client $client;
-
-    /**
-     * Durée de cache pour la modération (secondes).
-     */
-    private const MODERATION_CACHE_TTL = 3600;
-
-    /**
-     * Durée de cache pour les tags (secondes).
-     */
-    private const TAGS_CACHE_TTL = 1800;
+    private PendingRequest $client;
+    private string $model;
+    private string $baseUrl;
 
     public function __construct()
     {
-        $this->client = new Client([
-            'base_uri' => config('services.deepseek.base_url', 'https://api.deepseek.com/v1'),
-            'timeout'  => 60,
-            'connect_timeout' => 10,
-            'headers'  => [
-                'Authorization' => 'Bearer ' . config('services.deepseek.api_key'),
-                'Content-Type'  => 'application/json',
-                'Accept'        => 'application/json',
-            ],
+        $this->model = config('ai.model', 'llama-3.3-70b-versatile');
+        $this->baseUrl = rtrim(config('ai.base_url', 'https://api.groq.com/openai/v1'), '/');
+
+        Log::info('AI Service initialized', [
+            'provider' => config('ai.provider', 'groq'),
+            'base_url' => $this->baseUrl,
+            'model' => $this->model,
+            'api_key_present' => !empty(config('ai.api_key')),
         ]);
+
+        $this->client = Http::acceptJson()
+            ->withToken(config('ai.api_key'))
+            ->baseUrl($this->baseUrl)
+            ->timeout(config('ai.timeout', 60))
+            ->retry(2, 500);
     }
 
-    // ──────────────────────────────────────────────────────────
-    // CHAT
-    // ──────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────
+    // 1. CHAT DIRECT
+    // ──────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Envoie une conversation et retourne la réponse complète.
-     *
-     * @param  array  $messages  Tableau de messages [['role'=>..., 'content'=>...]]
-     * @param  array  $options   Options optionnelles (model, temperature, max_tokens…)
-     * @return array{success: bool, content: string, usage: array, model: string, error?: string, code?: int}
-     */
     public function chat(array $messages, array $options = []): array
     {
-        $payload = $this->buildPayload($messages, $options, stream: false);
-
         try {
-            $response = $this->client->post('/chat/completions', ['json' => $payload]);
-            $data     = json_decode($response->getBody()->getContents(), true);
+            Log::info('AI Chat request', [
+                'model' => $this->model,
+                'messages_count' => count($messages),
+            ]);
+
+            $response = $this->client->post('/chat/completions', array_merge([
+                'model' => $this->model,
+                'messages' => $messages,
+                'temperature' => 0.7,
+                'max_tokens' => 1024,
+            ], $options));
+
+            if ($response->failed()) {
+                Log::error('AI Request Failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return [
+                    'success' => false,
+                    'error' => $response->json('error.message') ?? $response->body(),
+                    'code' => $response->status(),
+                ];
+            }
+
+            $data = $response->json();
 
             return [
                 'success' => true,
                 'content' => $data['choices'][0]['message']['content'] ?? '',
-                'usage'   => $data['usage'] ?? [],
-                'model'   => $data['model'] ?? $payload['model'],
+                'tokens' => $data['usage']['total_tokens'] ?? 0,
+                'finish_reason' => $data['choices'][0]['finish_reason'] ?? 'stop',
+                'model' => $data['model'] ?? $this->model,
             ];
         } catch (\Throwable $e) {
-            return $this->handleException($e, 'chat');
+            Log::error('AI Exception', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'code' => 500,
+            ];
         }
     }
 
-    /**
-     * Streaming SSE — appelle $onChunk pour chaque token reçu.
-     *
-     * @param  array     $messages
-     * @param  callable  $onChunk   Reçoit string $token
-     * @param  array     $options
-     */
-    public function chatStream(array $messages, callable $onChunk, array $options = []): void
-    {
-        $payload = $this->buildPayload($messages, $options, stream: true);
+    // ──────────────────────────────────────────────────────────────────────────
+    // 2. CHAT AVEC SYSTEM PROMPT
+    // ──────────────────────────────────────────────────────────────────────────
 
+    public function chatWithSystem(array $messages, ?string $systemPrompt = null, array $options = []): array
+    {
+        $fullMessages = [];
+
+        if ($systemPrompt) {
+            $fullMessages[] = ['role' => 'system', 'content' => $systemPrompt];
+        } elseif (config('ai.system_prompts.chat')) {
+            $fullMessages[] = ['role' => 'system', 'content' => config('ai.system_prompts.chat')];
+        } else {
+            $fullMessages[] = ['role' => 'system', 'content' => $this->getDefaultSystemPrompt()];
+        }
+
+        $fullMessages = array_merge($fullMessages, $messages);
+
+        return $this->chat($fullMessages, $options);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 3. STREAMING SSE (CORRIGÉ - Version qui fonctionne)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function streamChatOutput(array $messages, callable $callback): void
+    {
         try {
-            $response = $this->client->post('/chat/completions', [
-                'json'   => $payload,
-                'stream' => true,
+            Log::info('AI Stream request', [
+                'model' => $this->model,
+                'messages_count' => count($messages),
             ]);
 
-            $body = $response->getBody();
+            $response = $this->client
+                ->withOptions(['stream' => true])
+                ->post('/chat/completions', [
+                    'model' => $this->model,
+                    'messages' => $messages,
+                    'max_tokens' => 1024,
+                    'temperature' => 0.7,
+                    'stream' => true,
+                ]);
 
-            while (! $body->eof()) {
-                $line = $this->readStreamLine($body);
+            if ($response->failed()) {
+                $errorBody = $response->body();
+                Log::error('AI Stream Request Failed', [
+                    'status' => $response->status(),
+                    'body' => $errorBody,
+                ]);
 
-                if (! str_starts_with($line, 'data: ')) {
-                    continue;
-                }
+                echo "event: error\ndata: " . json_encode([
+                    'error' => $response->json('error.message') ?? $errorBody,
+                    'status' => $response->status(),
+                ]) . "\n\n";
+                flush();
+                return;
+            }
 
-                $data = substr($line, 6);
+            $body = $response->toPsrResponse()->getBody();
+            $tokenCount = 0;
 
-                if ($data === '[DONE]') {
+            while (!$body->eof()) {
+                if (connection_aborted()) {
+                    Log::warning('Stream aborted by client');
                     break;
                 }
 
-                $chunk   = json_decode($data, true);
-                $content = $chunk['choices'][0]['delta']['content'] ?? '';
+                $chunk = $body->read(1024);
 
-                if ($content !== '') {
-                    $onChunk($content);
+                if (empty($chunk)) {
+                    continue;
+                }
+
+                $lines = explode("\n", $chunk);
+
+                foreach ($lines as $line) {
+                    $line = trim($line);
+
+                    if (empty($line)) {
+                        continue;
+                    }
+
+                    if (!str_starts_with($line, 'data:')) {
+                        continue;
+                    }
+
+                    $payload = trim(substr($line, 5));
+
+                    if ($payload === '[DONE]') {
+                        Log::info('Stream DONE received', ['tokens_sent' => $tokenCount]);
+                        echo "event: done\ndata: {}\n\n";
+                        flush();
+                        return;
+                    }
+
+                    $decoded = json_decode($payload, true);
+
+                    if (json_last_error() !== JSON_ERROR_NONE) {
+                        Log::warning('Invalid JSON in stream', [
+                            'payload' => substr($payload, 0, 200),
+                            'error' => json_last_error_msg(),
+                        ]);
+                        continue;
+                    }
+
+                    $token = $decoded['choices'][0]['delta']['content'] ?? null;
+
+                    if ($token !== null && $token !== '') {
+                        $tokenCount++;
+                        echo 'data: ' . json_encode(['token' => $token]) . "\n\n";
+                        flush();
+                        $callback($token);
+                    }
                 }
             }
+
+            Log::info('Stream ended', ['total_tokens' => $tokenCount]);
         } catch (\Throwable $e) {
-            Log::error('DeepSeek stream error', ['message' => $e->getMessage()]);
-            $onChunk('[ERREUR: Le service IA est temporairement indisponible]');
+            Log::error('AI Stream Exception', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            echo "event: error\ndata: " . json_encode([
+                'error' => $e->getMessage(),
+                'type' => get_class($e),
+            ]) . "\n\n";
+            flush();
         }
     }
 
-    // ──────────────────────────────────────────────────────────
-    // MODÉRATION
-    // ──────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────
+    // 4. STREAMING AVEC SYSTEM PROMPT
+    // ──────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Analyse un contenu textuel et retourne un rapport de modération.
-     *
-     * Résultat mis en cache 1h (même contenu = même résultat).
-     *
-     * @return array{is_safe: bool, score: float, categories: string[], reason: string}
-     */
-    public function moderateContent(string $content): array
+    public function streamChatWithSystem(array $messages, ?string $systemPrompt = null, callable $callback): void
     {
-        $cacheKey = 'deepseek_moderation_' . md5($content);
+        $fullMessages = [];
 
-        return Cache::remember($cacheKey, self::MODERATION_CACHE_TTL, function () use ($content) {
-            $result = $this->chat(
-                messages: [
-                    [
-                        'role'    => 'system',
-                        'content' => <<<'PROMPT'
-Tu es un système de modération pour une communauté en ligne.
-Analyse le texte ci-dessous et réponds UNIQUEMENT avec un objet JSON valide, sans markdown ni backticks.
-Format attendu :
-{
-  "is_safe": true|false,
-  "score": 0.0 à 1.0 (probabilité de contenu problématique),
-  "categories": [] (tableau des catégories détectées parmi : hate_speech, harassment, spam, misinformation, adult_content, violence),
-  "reason": "explication courte en français"
-}
-PROMPT,
-                    ],
-                    [
-                        'role'    => 'user',
-                        'content' => "Contenu à analyser :\n\n" . mb_substr($content, 0, 3000),
-                    ],
-                ],
-                options: [
-                    'model'       => config('services.deepseek.default_model', 'deepseek-chat'),
-                    'temperature' => 0.1,
-                    'max_tokens'  => 300,
-                ]
-            );
+        if ($systemPrompt) {
+            $fullMessages[] = ['role' => 'system', 'content' => $systemPrompt];
+        } elseif (config('ai.system_prompts.chat')) {
+            $fullMessages[] = ['role' => 'system', 'content' => config('ai.system_prompts.chat')];
+        } else {
+            $fullMessages[] = ['role' => 'system', 'content' => $this->getDefaultSystemPrompt()];
+        }
 
-            if (! $result['success']) {
-                // En cas d'erreur API, on laisse passer (fail open) pour ne pas bloquer la publication
-                Log::warning('DeepSeek moderation failed, defaulting to safe', ['error' => $result['error'] ?? '']);
-                return $this->defaultSafeResult();
-            }
+        $fullMessages = array_merge($fullMessages, $messages);
 
-            // Nettoyage des éventuels blocs markdown retournés par le modèle
-            $json   = preg_replace('/```(?:json)?\n?|\n?```/', '', trim($result['content']));
-            $parsed = json_decode($json, true);
+        $this->streamChatOutput($fullMessages, $callback);
+    }
 
-            if (! is_array($parsed)) {
-                Log::warning('DeepSeek moderation: invalid JSON response', ['raw' => $result['content']]);
-                return $this->defaultSafeResult();
-            }
+    // ──────────────────────────────────────────────────────────────────────────
+    // 5. MODÉRATION
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function moderate(string $content): array
+    {
+        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+
+        $prompt = <<<PROMPT
+Analyse ce contenu pour détecter: spam, discours haineux, violence, contenu adulte, désinformation.
+
+<content_to_analyze>
+{$sanitizedContent}
+</content_to_analyze>
+
+Réponds UNIQUEMENT en JSON valide avec le format:
+{"flagged": bool, "confidence": float, "reasons": ["raison1", ...]}
+PROMPT;
+
+        $result = $this->chat([
+            ['role' => 'user', 'content' => $prompt],
+        ], ['temperature' => 0.1, 'max_tokens' => 256]);
+
+        if (!($result['success'] ?? false)) {
+            Log::error('Moderation API failed', ['error' => $result['error'] ?? 'Unknown']);
+            return [
+                'flagged' => false,
+                'confidence' => 0.0,
+                'reasons' => ['API_ERROR'],
+                'requires_review' => true,
+                'raw' => $result['error'] ?? null,
+                'model' => $this->model,
+            ];
+        }
+
+        $json = json_decode($result['content'], true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error('Moderation JSON parse failed', [
+                'content_preview' => substr($result['content'], 0, 200),
+            ]);
 
             return [
-                'is_safe'    => (bool)  ($parsed['is_safe']    ?? true),
-                'score'      => (float) ($parsed['score']      ?? 0.0),
-                'categories' => (array) ($parsed['categories'] ?? []),
-                'reason'     => (string)($parsed['reason']     ?? ''),
+                'flagged' => false,
+                'confidence' => 0.0,
+                'reasons' => ['PARSE_ERROR'],
+                'requires_review' => true,
+                'raw' => $result['content'],
+                'model' => $result['model'] ?? $this->model,
             ];
-        });
-    }
-
-    // ──────────────────────────────────────────────────────────
-    // TAGS
-    // ──────────────────────────────────────────────────────────
-
-    /**
-     * Génère des tags pertinents pour un post communautaire.
-     *
-     * @param  int  $maxTags  Nombre maximum de tags à générer (défaut : 5)
-     * @return string[]
-     */
-    public function generateTags(string $postContent, int $maxTags = 5): array
-    {
-        $cacheKey = 'deepseek_tags_' . md5($postContent . $maxTags);
-
-        return Cache::remember($cacheKey, self::TAGS_CACHE_TTL, function () use ($postContent, $maxTags) {
-            $result = $this->chat(
-                messages: [
-                    [
-                        'role'    => 'system',
-                        'content' => 'Tu génères des tags concis et pertinents pour des posts communautaires. '
-                            . 'Réponds UNIQUEMENT avec un tableau JSON de strings, sans markdown. '
-                            . 'Exemple : ["tag1", "tag2", "tag3"]',
-                    ],
-                    [
-                        'role'    => 'user',
-                        'content' => "Génère {$maxTags} tags pour ce post :\n\n" . mb_substr($postContent, 0, 2000),
-                    ],
-                ],
-                options: ['temperature' => 0.3, 'max_tokens' => 150]
-            );
-
-            if (! $result['success']) {
-                return [];
-            }
-
-            $json = preg_replace('/```(?:json)?\n?|\n?```/', '', trim($result['content']));
-            $tags = json_decode($json, true);
-
-            if (! is_array($tags)) {
-                return [];
-            }
-
-            // Nettoyage : on garde uniquement les strings non vides
-            return array_values(array_filter(
-                array_slice($tags, 0, $maxTags),
-                fn($t) => is_string($t) && trim($t) !== ''
-            ));
-        });
-    }
-
-    // ──────────────────────────────────────────────────────────
-    // RÉSUMÉ DE FIL DE DISCUSSION
-    // ──────────────────────────────────────────────────────────
-
-    /**
-     * Résume un fil de discussion.
-     *
-     * @param  array  $messages  Tableau de ['author' => string, 'content' => string]
-     */
-    public function summarizeThread(array $messages): string
-    {
-        if (count($messages) < 2) {
-            return 'Pas assez de messages pour générer un résumé.';
         }
 
-        // Construction du fil de discussion formaté
-        $thread = collect($messages)
-            ->map(fn($m) => "[{$m['author']}] : {$m['content']}")
-            ->implode("\n");
-
-        // Limite de tokens : on tronque si nécessaire
-        $thread = mb_substr($thread, 0, 4000);
-
-        $result = $this->chat(
-            messages: [
-                [
-                    'role'    => 'system',
-                    'content' => 'Tu résumes des discussions communautaires en 2 à 3 phrases claires, neutres et informatives. '
-                        . 'Tu mentionnes les points clés et le consensus éventuel.',
-                ],
-                [
-                    'role'    => 'user',
-                    'content' => "Résume cette discussion :\n\n{$thread}",
-                ],
-            ],
-            options: ['max_tokens' => 512, 'temperature' => 0.4]
-        );
-
-        return $result['success'] ? $result['content'] : 'Résumé temporairement indisponible.';
-    }
-
-    // ──────────────────────────────────────────────────────────
-    // AMÉLIORATION DE POST
-    // ──────────────────────────────────────────────────────────
-
-    /**
-     * Améliore la clarté et la lisibilité d'un post.
-     * Conserve le sens, le ton et la langue d'origine.
-     */
-    public function improvePost(string $content): string
-    {
-        $result = $this->chat(
-            messages: [
-                [
-                    'role'    => 'system',
-                    'content' => 'Tu es un assistant de rédaction pour une communauté en ligne. '
-                        . 'Améliore la clarté, la lisibilité et la structure du texte sans en changer le sens, '
-                        . 'le ton ni la langue. Retourne uniquement le texte amélioré, sans commentaire.',
-                ],
-                [
-                    'role'    => 'user',
-                    'content' => "Améliore ce post :\n\n" . mb_substr($content, 0, 3000),
-                ],
-            ],
-            options: ['max_tokens' => 1024, 'temperature' => 0.5]
-        );
-
-        return $result['success'] ? $result['content'] : $content;
-    }
-
-    // ──────────────────────────────────────────────────────────
-    // HELPERS PRIVÉS
-    // ──────────────────────────────────────────────────────────
-
-    /**
-     * Construit le payload pour l'API DeepSeek.
-     */
-    private function buildPayload(array $messages, array $options, bool $stream): array
-    {
-        return array_merge([
-            'model'       => config('services.deepseek.default_model', 'deepseek-chat'),
-            'messages'    => $messages,
-            'max_tokens'  => config('services.deepseek.max_tokens', 2048),
-            'temperature' => config('services.deepseek.temperature', 0.7),
-            'stream'      => $stream,
-        ], $options);
-    }
-
-    /**
-     * Lit une ligne depuis un stream Guzzle.
-     */
-    private function readStreamLine($body): string
-    {
-        $line = '';
-        while (! $body->eof()) {
-            $char = $body->read(1);
-            if ($char === "\n") {
-                break;
-            }
-            $line .= $char;
-        }
-        return rtrim($line, "\r");
-    }
-
-    /**
-     * Résultat par défaut en cas d'erreur de modération (fail open).
-     */
-    private function defaultSafeResult(): array
-    {
         return [
-            'is_safe'    => true,
-            'score'      => 0.0,
-            'categories' => [],
-            'reason'     => 'Modération indisponible — contenu publié sans vérification.',
+            'flagged' => (bool) ($json['flagged'] ?? false),
+            'confidence' => (float) ($json['confidence'] ?? 0.0),
+            'reasons' => (array) ($json['reasons'] ?? []),
+            'requires_review' => ($json['confidence'] ?? 0) > 0.5,
+            'raw' => $result['content'],
+            'model' => $result['model'] ?? $this->model,
         ];
     }
 
-    /**
-     * Normalise les exceptions Guzzle en tableau d'erreur.
-     */
-    private function handleException(\Throwable $e, string $context): array
-    {
-        $code    = $e->getCode();
-        $message = $e->getMessage();
+    // ──────────────────────────────────────────────────────────────────────────
+    // 6. TAGS
+    // ──────────────────────────────────────────────────────────────────────────
 
-        if ($e instanceof ConnectException) {
-            $userMessage = 'Impossible de joindre le service IA. Veuillez réessayer.';
-        } elseif ($e instanceof ServerException) {
-            $userMessage = 'Le service IA est temporairement indisponible (erreur serveur).';
-        } elseif ($e instanceof RequestException && $code === 429) {
-            $userMessage = 'Quota IA dépassé. Veuillez patienter avant de réessayer.';
-        } elseif ($e instanceof RequestException && $code === 401) {
-            $userMessage = 'Clé API invalide. Contactez l\'administrateur.';
-        } else {
-            $userMessage = 'Une erreur inattendue s\'est produite avec le service IA.';
+    public function generateTags(string $content, int $max = 5): array
+    {
+        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+
+        $prompt = <<<PROMPT
+Génère exactement {$max} tags pertinents pour ce contenu.
+
+<content_to_analyze>
+{$sanitizedContent}
+</content_to_analyze>
+
+Réponds UNIQUEMENT en JSON: {"tags": ["tag1", "tag2", ...]}
+PROMPT;
+
+        $result = $this->chat([
+            ['role' => 'user', 'content' => $prompt],
+        ], ['temperature' => 0.3, 'max_tokens' => 128]);
+
+        if (!($result['success'] ?? false)) {
+            Log::error('Tag generation failed', ['error' => $result['error'] ?? 'Unknown']);
+            return [];
         }
 
-        Log::error("DeepSeek error [{$context}]", [
-            'code'    => $code,
-            'message' => $message,
-            'class'   => get_class($e),
-        ]);
+        $json = json_decode($result['content'], true);
+        return $json['tags'] ?? [];
+    }
 
-        return [
-            'success' => false,
-            'error'   => $userMessage,
-            'code'    => $code,
-            'content' => '',
-            'usage'   => [],
-            'model'   => '',
-        ];
+    // ──────────────────────────────────────────────────────────────────────────
+    // 7. RÉSUMÉ
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function summarize(string $content, string $language = 'fr'): string
+    {
+        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+
+        $systemPrompt = config(
+            'ai.system_prompts.summarize',
+            "Tu es un assistant qui résume des discussions. Réponds en {$language}. Sois concis (3-5 phrases max)."
+        );
+
+        $result = $this->chatWithSystem(
+            [
+                ['role' => 'user', 'content' => "Résume cette discussion:\n\n{$sanitizedContent}"],
+            ],
+            $systemPrompt,
+            ['temperature' => 0.4, 'max_tokens' => 256]
+        );
+
+        return $result['content'] ?? '';
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 8. AMÉLIORATION DE TEXTE
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function improvePost(string $content, string $language = 'fr'): string
+    {
+        $systemPrompt = config(
+            'ai.system_prompts.improve',
+            "Améliore le texte suivant en corrigeant les fautes et en le rendant plus clair. Réponds en {$language}."
+        );
+
+        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+
+        $result = $this->chatWithSystem(
+            [
+                ['role' => 'user', 'content' => $sanitizedContent],
+            ],
+            $systemPrompt,
+            ['temperature' => 0.5, 'max_tokens' => 512]
+        );
+
+        return $result['content'] ?? '';
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 9. SYSTEM PROMPT PAR DÉFAUT
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private function getDefaultSystemPrompt(): string
+    {
+        return config(
+            'ai.system_prompts.chat',
+            "Tu es AgriPulse AI, l'assistant intelligent de la plateforme communautaire agricole AgriPulse.
+
+Ta mission est d'aider les agriculteurs, éleveurs, techniciens agricoles et membres de la communauté.
+
+Règles :
+1. Utilise les informations du contexte pour répondre
+2. Sois courtois, professionnel et empathique
+3. Si tu ne sais pas, dis-le honnêtement
+4. Ne donne pas de conseils médicaux vétérinaires sans mentionner la consultation d'un professionnel
+5. Structure ta réponse de manière claire et organisée"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 10. HEALTH CHECK
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function healthCheck(): array
+    {
+        try {
+            Log::info('AI Health Check', [
+                'base_url' => $this->baseUrl,
+            ]);
+
+            $response = $this->client->get('/models');
+
+            return [
+                'status' => 'ok',
+                'api_connected' => $response->successful(),
+                'model' => $this->model,
+                'base_url' => $this->baseUrl,
+                'response_code' => $response->status(),
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'status' => 'error',
+                'error' => $e->getMessage(),
+                'model' => $this->model,
+                'base_url' => $this->baseUrl,
+            ];
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 11. ESTIMATION DE TOKENS
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function estimateTokens(string $text): int
+    {
+        $wordCount = str_word_count($text, 0, 'àâäéèêëîïôöûüÿçÀÂÄÉÈÊËÎÏÔÖÛÜŸÇ');
+        $charCount = mb_strlen($text);
+        return max(1, (int) ceil(max($charCount / 4, $wordCount * 0.75)));
     }
 }
