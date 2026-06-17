@@ -359,6 +359,51 @@ class MessageController extends Controller
             ], 500);
         }
     }
+
+    // Récupérer le statut d'un message spécifique
+    public function getMessageStatus(Request $request, int $messageId): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            $message = Message::findOrFail($messageId);
+
+            // Vérifier que l'utilisateur a accès à cette conversation
+            $hasAccess = DB::table('conversation_user')
+                ->where('conversation_id', $message->conversation_id)
+                ->where('user_id', $user->id)
+                ->exists();
+
+            if (!$hasAccess) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès refusé.'
+                ], 403);
+            }
+
+            // Déterminer le statut basé sur la colonne 'status'
+            $is_read = $message->status === 'read';
+            $is_delivered = in_array($message->status, ['delivered', 'read']);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'is_read' => $is_read,
+                    'is_delivered' => $is_delivered,
+                    'status' => $message->status,
+                    'read_at' => $message->status === 'read' ? $message->updated_at : null,
+                    'delivered_at' => $message->status === 'delivered' || $message->status === 'read'
+                        ? $message->updated_at
+                        : null,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('GetMessageStatus error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
     // Marquer comme lu
     public function markAsRead(Request $request, int $conversationId): JsonResponse
     {
