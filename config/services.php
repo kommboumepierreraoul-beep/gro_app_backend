@@ -41,12 +41,12 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
-    'deepseek' => [
-        'api_key'       => env('DEEPSEEK_API_KEY'),
-        'base_url'      => env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1'),
-        'default_model' => env('DEEPSEEK_DEFAULT_MODEL', 'deepseek-chat'),
-        'max_tokens'    => env('DEEPSEEK_MAX_TOKENS', 2048),
-        'temperature'   => env('DEEPSEEK_TEMPERATURE', 0.7),
+    'ai' => [
+        'api_key'       => env('AI_API_KEY'),
+        'base_url'      => env('AI_BASE_URL'),
+        'default_model' => env('AI_DEFAULT_MODEL'),
+        'max_tokens'    => env('AI_MAX_TOKENS', 2048),
+        'temperature'   => env('AI_TEMPERATURE', 0.7),
     ],
 
 ];
