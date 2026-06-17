@@ -331,7 +331,7 @@ class OrderController extends Controller
                 'email'       => $user->email,
                 'reference'   => $order->order_number,
                 // ⚠️ Remplacez cette URL par votre domaine ngrok actuel (ou utilisez une variable d'environnement)
-                'callback'    => 'https://device-sputter-august.ngrok-free.dev/api/orders/notchpay/webhook',
+                'callback'    => config('app.url') . '/api/orders/notchpay/webhook',
                 'description' => 'Paiement commande ' . $order->order_number,
             ]);
 

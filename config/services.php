@@ -47,4 +47,10 @@ return [
     'webhook_hash' => env('NOTCHPAY_WEBHOOK_HASH'),
 ],
 
+
+    'vapid' => [
+        'subject'     => env('VAPID_SUBJECT'),
+        'public_key'  => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+    ],
 ];

@@ -8,6 +8,7 @@ use App\Services\NotchPayService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use App\Notifications\DepositCompleted;
 
 class WalletController extends Controller
 {
@@ -97,6 +98,7 @@ class WalletController extends Controller
             $transaction->update(['status' => 'completed']);
             $transaction->user->wallet->credit($transaction->amount, $transaction->description, [], $transaction);
             Log::info('Deposit completed', ['tx_id' => $transactionId]);
+            $transaction->user->notify(new DepositCompleted($transaction->amount));
         } else {
             $transaction->update(['status' => 'failed']);
             Log::warning('Deposit failed', ['tx_id' => $transactionId, 'status' => $realStatus]);

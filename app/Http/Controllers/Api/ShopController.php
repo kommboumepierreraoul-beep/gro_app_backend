@@ -65,6 +65,7 @@ class ShopController extends Controller
         'phone'       => $request->phone,
         'status'      => 'active',
     ]);
+    $user->update(['role' => 'seller']);
 
     return response()->json(['success' => true, 'data' => $shop], 201);
 }
@@ -116,6 +117,9 @@ class ShopController extends Controller
     $shop->banner = $shop->banner ? asset('storage/' . $shop->banner) : null;
 
     return response()->json(['success' => true, 'data' => $shop]);
+
+    // ✅ Passer en seller automatiquement
+        $user->update(['role' => 'seller']);
 }
 
 

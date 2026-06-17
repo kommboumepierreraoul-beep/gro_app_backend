@@ -16,7 +16,8 @@ class ShopController extends Controller
             ->withCount('products')
             ->with('user:id,firstname,lastname')
             ->paginate(15);
-        return response()->json(['success' => true, 'data' => $shops]);
+        $user->update(['role' => 'seller']);
+    return response()->json(['success' => true, 'data' => $shops]);
     }
 
     // Créer sa boutique
@@ -25,7 +26,8 @@ class ShopController extends Controller
     $user = $request->user();
 
     if ($user->shop) {
-        return response()->json([
+        $user->update(['role' => 'seller']);
+    return response()->json([
             'success' => false,
             'message' => 'You already have a shop'
         ], 400);
@@ -69,6 +71,7 @@ class ShopController extends Controller
         'status'      => 'active',
     ]);
 
+    $user->update(['role' => 'seller']);
     return response()->json([
         'success' => true,
         'data' => $shop
@@ -82,7 +85,8 @@ class ShopController extends Controller
             $q->where('status', 'active')->limit(10);
         }])->findOrFail($id);
 
-        return response()->json(['success' => true, 'data' => $shop]);
+        $user->update(['role' => 'seller']);
+    return response()->json(['success' => true, 'data' => $shop]);
     }
 
     // Modifier sa boutique
@@ -91,14 +95,16 @@ class ShopController extends Controller
         $shop = Shop::findOrFail($id);
 
         if ($shop->user_id !== $request->user()->id) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+            $user->update(['role' => 'seller']);
+    return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
         $shop->update($request->only([
             'name', 'description', 'logo', 'banner', 'address', 'city', 'phone'
         ]));
 
-        return response()->json(['success' => true, 'data' => $shop]);
+        $user->update(['role' => 'seller']);
+    return response()->json(['success' => true, 'data' => $shop]);
     }
 
     // Ma boutique
@@ -106,9 +112,11 @@ class ShopController extends Controller
     {
         $shop = $request->user()->shop;
         if (!$shop) {
-            return response()->json(['success' => false, 'message' => 'No shop found'], 404);
+            $user->update(['role' => 'seller']);
+    return response()->json(['success' => false, 'message' => 'No shop found'], 404);
         }
-        return response()->json(['success' => true, 'data' => $shop]);
+        $user->update(['role' => 'seller']);
+    return response()->json(['success' => true, 'data' => $shop]);
     }
     
 
@@ -118,13 +126,15 @@ public function myShopProfile(Request $request)
     $shop = $user->shop;
 
     if (!$shop) {
-        return response()->json(['success' => false, 'message' => 'Boutique introuvable'], 404);
+        $user->update(['role' => 'seller']);
+    return response()->json(['success' => false, 'message' => 'Boutique introuvable'], 404);
     }
 
     // Générer les URLs complètes
     $shop->logo = $shop->logo ? asset('storage/' . $shop->logo) : null;
     $shop->banner = $shop->banner ? asset('storage/' . $shop->banner) : null;
 
+    $user->update(['role' => 'seller']);
     return response()->json(['success' => true, 'data' => $shop]);
 }
 }
