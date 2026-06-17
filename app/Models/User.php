@@ -107,7 +107,6 @@ class User extends Authenticatable implements MustVerifyEmail
     // FOLLOW SYSTEM
     // -------------------------------------------------------------------------
 
-    // Utilisateurs que je suis
     public function following(): BelongsToMany
     {
         return $this->belongsToMany(
@@ -118,7 +117,6 @@ class User extends Authenticatable implements MustVerifyEmail
         )->withTimestamps();
     }
 
-    // Utilisateurs qui me suivent
     public function followers(): BelongsToMany
     {
         return $this->belongsToMany(
@@ -152,6 +150,29 @@ class User extends Authenticatable implements MustVerifyEmail
     public function communityNotifications(): HasMany
     {
         return $this->hasMany(CommunityNotification::class);
+    }
+
+    // -------------------------------------------------------------------------
+    // ✅ AI CONVERSATIONS - NOUVELLES RELATIONS
+    // -------------------------------------------------------------------------
+
+    /**
+     * Relation avec les conversations AI
+     * Nom: aiConversations (pour correspondre à la convention du code)
+     */
+    public function aiConversations(): HasMany
+    {
+        return $this->hasMany(AiConversation::class, 'user_id')
+            ->orderBy('updated_at', 'desc');
+    }
+
+    /**
+     * Alias pour compatibilité avec le code existant
+     * Certains codes utilisent 'conversations' comme nom de relation
+     */
+    public function aimessageconversations(): HasMany
+    {
+        return $this->aiConversations();
     }
 
     // -------------------------------------------------------------------------
@@ -203,11 +224,28 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return $this->hasMany(Mission::class, 'author_id');
     }
-   
 
     // Accesseur pour avatar
     public function getAvatarAttribute()
     {
         return $this->profile?->avatar;
+    }
+
+    // -------------------------------------------------------------------------
+    // ✅ MÉTHODE POUR VÉRIFIER SI L'UTILISATEUR A DES CONVERSATIONS AI
+    // -------------------------------------------------------------------------
+
+    public function hasAiConversations(): bool
+    {
+        return $this->aiConversations()->count() > 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // ✅ MÉTHODE POUR RÉCUPÉRER LA DERNIÈRE CONVERSATION AI
+    // -------------------------------------------------------------------------
+
+    public function getLatestAiConversation()
+    {
+        return $this->aiConversations()->first();
     }
 }
