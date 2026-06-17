@@ -72,6 +72,7 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
 
         Route::get('/conversations/{id}/messages', [MessageController::class, 'messages']);
         Route::post('/conversations/{id}/messages', [MessageController::class, 'send']);
+        // Route::get('/messages/messages/{id}/status', [MessageController::class, 'getMessageStatus']);
         Route::delete('/messages/{id}', [MessageController::class, 'deleteMessage']);
     });
 
