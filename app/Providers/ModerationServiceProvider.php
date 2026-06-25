@@ -11,17 +11,16 @@ use App\Services\Moderation\SyncModerationService;
 use App\Services\Moderation\DecisionEngine;
 use App\Services\Moderation\FastModerationLayer;
 use App\Services\Moderation\ModerationService;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ServiceProvider;
 
-class AppServiceProvider extends ServiceProvider
+class ModerationServiceProvider extends ServiceProvider
 {
     /**
-     * Register any application services.
+     * Register services.
      */
     public function register(): void
     {
-        // ✅ Enregistrer le binding de l'interface IA
+        // 1. Binding de l'interface
         $this->app->bind(AIModerationInterface::class, function ($app) {
             $provider = config('moderation.ai_provider', 'groq');
 
@@ -31,7 +30,7 @@ class AppServiceProvider extends ServiceProvider
             };
         });
 
-        // ✅ Services de modération
+        // 2. Services
         $this->app->singleton(DecisionEngine::class, function ($app) {
             return new DecisionEngine();
         });
@@ -58,44 +57,13 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bootstrap any application services.
+     * Bootstrap services.
      */
     public function boot(): void
     {
-        // ✅ Enregistrer la règle de validation exists_with
-        Validator::extend('exists_with', function ($attribute, $value, $parameters, $validator) {
-            $contextType = $validator->getData()['context_type'] ?? null;
-
-            if (empty($contextType)) {
-                return true; // Pas de contexte = pas de validation
-            }
-
-            // ✅ Vérifier que le modèle existe avant de l'utiliser
-            $modelMap = [
-                'post' => \App\Models\Post::class,
-                'comment' => \App\Models\Comment::class,
-                // ✅ Ajouter d'autres types si nécessaire
-                // 'message' => \App\Models\Message::class,
-                // 'user' => \App\Models\User::class,
-            ];
-
-            $model = $modelMap[$contextType] ?? null;
-
-            if (!$model || !class_exists($model)) {
-                return true; // Type inconnu ou modèle inexistant = pas de validation
-            }
-
-            return $model::where('id', $value)->exists();
-        });
-
-        // ✅ Ajouter une règle de validation pour la modération
-        Validator::extend('moderation_status', function ($attribute, $value, $parameters, $validator) {
-            return in_array($value, ['pending', 'approved', 'review', 'rejected']);
-        });
-
-        // ✅ Ajouter une règle de validation pour les scores
-        Validator::extend('moderation_score', function ($attribute, $value, $parameters, $validator) {
-            return is_numeric($value) && $value >= 0 && $value <= 1;
-        });
+        // Publier la configuration
+        $this->publishes([
+            __DIR__ . '/../../config/moderation.php' => config_path('moderation.php'),
+        ], 'moderation-config');
     }
 }

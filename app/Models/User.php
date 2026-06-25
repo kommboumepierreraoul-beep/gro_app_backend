@@ -74,6 +74,11 @@ class User extends Authenticatable implements MustVerifyEmail
         return "{$this->firstname} {$this->lastname}";
     }
 
+    public function getAvatarAttribute()
+    {
+        return $this->profile?->avatar;
+    }
+
     // -------------------------------------------------------------------------
     // RELATIONS
     // -------------------------------------------------------------------------
@@ -153,26 +158,89 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     // -------------------------------------------------------------------------
-    // ✅ AI CONVERSATIONS - NOUVELLES RELATIONS
+    // AI CONVERSATIONS
     // -------------------------------------------------------------------------
 
-    /**
-     * Relation avec les conversations AI
-     * Nom: aiConversations (pour correspondre à la convention du code)
-     */
     public function aiConversations(): HasMany
     {
         return $this->hasMany(AiConversation::class, 'user_id')
             ->orderBy('updated_at', 'desc');
     }
 
-    /**
-     * Alias pour compatibilité avec le code existant
-     * Certains codes utilisent 'conversations' comme nom de relation
-     */
     public function aimessageconversations(): HasMany
     {
         return $this->aiConversations();
+    }
+
+    // -------------------------------------------------------------------------
+    // MISSIONS
+    // -------------------------------------------------------------------------
+
+    public function missions()
+    {
+        return $this->hasMany(Mission::class, 'author_id');
+    }
+
+    // -------------------------------------------------------------------------
+    // MODERATION - RELATIONS
+    // -------------------------------------------------------------------------
+
+    /**
+     * Récupère les modérations des posts de l'utilisateur
+     */
+    public function moderationPosts(): HasMany
+    {
+        return $this->hasMany(ModerationPost::class, 'post_id', 'id')
+            ->whereHas('post', function ($query) {
+                $query->where('user_id', $this->id);
+            });
+    }
+
+    /**
+     * Récupère les modérations des commentaires de l'utilisateur
+     */
+    public function moderationComments(): HasMany
+    {
+        return $this->hasMany(ModerationComment::class, 'comment_id', 'id')
+            ->whereHas('comment', function ($query) {
+                $query->where('user_id', $this->id);
+            });
+    }
+
+    /**
+     * Récupère les modérations des messages de l'utilisateur
+     */
+    public function moderationMessages(): HasMany
+    {
+        return $this->hasMany(ModerationMessage::class, 'message_id', 'id')
+            ->whereHas('message', function ($query) {
+                $query->where('sender_id', $this->id);
+            });
+    }
+
+    /**
+     * Récupère les décisions de modération prises par l'utilisateur (en tant que modérateur)
+     */
+    public function moderationDecisions(): HasMany
+    {
+        return $this->hasMany(ModerationAuditLog::class, 'actor_id')
+            ->where('actor_type', 'moderator');
+    }
+
+    /**
+     * Récupère les signalements faits par l'utilisateur
+     */
+    public function reports(): HasMany
+    {
+        return $this->hasMany(ModerationReport::class, 'reporter_id');
+    }
+
+    /**
+     * Récupère les signalements résolus par l'utilisateur (en tant que modérateur)
+     */
+    public function resolvedReports(): HasMany
+    {
+        return $this->hasMany(ModerationReport::class, 'resolved_by');
     }
 
     // -------------------------------------------------------------------------
@@ -213,6 +281,11 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->role === self::ROLE_FOURNISSEUR;
     }
 
+    public function isModerator(): bool
+    {
+        return $this->isAdmin();
+    }
+
     public function follows(User $user): bool
     {
         return $this->following()
@@ -220,32 +293,109 @@ class User extends Authenticatable implements MustVerifyEmail
             ->exists();
     }
 
-    public function missions()
-    {
-        return $this->hasMany(Mission::class, 'author_id');
-    }
-
-    // Accesseur pour avatar
-    public function getAvatarAttribute()
-    {
-        return $this->profile?->avatar;
-    }
-
-    // -------------------------------------------------------------------------
-    // ✅ MÉTHODE POUR VÉRIFIER SI L'UTILISATEUR A DES CONVERSATIONS AI
-    // -------------------------------------------------------------------------
-
     public function hasAiConversations(): bool
     {
         return $this->aiConversations()->count() > 0;
     }
 
-    // -------------------------------------------------------------------------
-    // ✅ MÉTHODE POUR RÉCUPÉRER LA DERNIÈRE CONVERSATION AI
-    // -------------------------------------------------------------------------
-
     public function getLatestAiConversation()
     {
         return $this->aiConversations()->first();
+    }
+
+    // -------------------------------------------------------------------------
+    // MODERATION - HELPERS
+    // -------------------------------------------------------------------------
+
+    /**
+     * Récupère tous les contenus en attente de modération de l'utilisateur
+     */
+    public function getPendingContentCount(): int
+    {
+        $pendingPosts = $this->posts()
+            ->whereHas('moderation', function ($query) {
+                $query->where('status', 'pending');
+            })->count();
+
+        $pendingComments = $this->comments()
+            ->whereHas('moderation', function ($query) {
+                $query->where('status', 'pending');
+            })->count();
+
+        $pendingMessages = $this->messages()
+            ->whereHas('moderation', function ($query) {
+                $query->where('status', 'pending');
+            })->count();
+
+        return $pendingPosts + $pendingComments + $pendingMessages;
+    }
+
+    /**
+     * Vérifie si l'utilisateur a des contenus rejetés
+     */
+    public function hasRejectedContent(): bool
+    {
+        return $this->posts()->whereHas('moderation', function ($query) {
+            $query->where('status', 'rejected');
+        })->exists() ||
+            $this->comments()->whereHas('moderation', function ($query) {
+                $query->where('status', 'rejected');
+            })->exists() ||
+            $this->messages()->whereHas('moderation', function ($query) {
+                $query->where('status', 'rejected');
+            })->exists();
+    }
+
+    /**
+     * Récupère le taux de rejet de l'utilisateur
+     */
+    public function getRejectionRate(): float
+    {
+        $total = $this->posts()->whereHas('moderation')->count() +
+            $this->comments()->whereHas('moderation')->count() +
+            $this->messages()->whereHas('moderation')->count();
+
+        if ($total === 0) {
+            return 0;
+        }
+
+        $rejected = $this->posts()->whereHas('moderation', function ($query) {
+            $query->where('status', 'rejected');
+        })->count() +
+            $this->comments()->whereHas('moderation', function ($query) {
+                $query->where('status', 'rejected');
+            })->count() +
+            $this->messages()->whereHas('moderation', function ($query) {
+                $query->where('status', 'rejected');
+            })->count();
+
+        return round(($rejected / $total) * 100, 2);
+    }
+
+    /**
+     * Vérifie si l'utilisateur peut publier (pas trop de rejets)
+     */
+    public function canPublish(): bool
+    {
+        $rejectionRate = $this->getRejectionRate();
+
+        // Si le taux de rejet dépasse 30%, l'utilisateur est limité
+        if ($rejectionRate > 30) {
+            return false;
+        }
+
+        // Vérifier si l'utilisateur a des contenus en attente depuis plus de 24h
+        $pendingSince = $this->posts()
+            ->whereHas('moderation', function ($query) {
+                $query->where('status', 'pending');
+            })
+            ->where('created_at', '<', now()->subHours(24))
+            ->count();
+
+        if ($pendingSince > 5) {
+            return false;
+        }
+
+        return true;
     }
 }

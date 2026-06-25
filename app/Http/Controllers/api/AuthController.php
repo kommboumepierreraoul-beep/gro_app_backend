@@ -9,11 +9,13 @@ use App\Notifications\ResetPasswordNotification;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Exception;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Laravel\Socialite\Facades\Socialite;
@@ -461,34 +463,79 @@ class AuthController extends Controller
         ], 500);
     }
 
-    // OAuth via Google (bonus, non demandé) :
-
     public function redirect()
     {
-        return Socialite::driver('google')->stateless()->redirect();
+        return Socialite::driver('google')
+            ->stateless()
+            ->scopes(['email', 'profile'])
+            ->redirect();
     }
 
+    /**
+     * Callback de Google OAuth
+     */
     public function callback()
     {
-        $googleUser = Socialite::driver('google')
-            ->stateless()
-            ->user();
+        try {
+            // 1. Récupérer l'utilisateur Google
+            $googleUser = Socialite::driver('google')
+                ->stateless()
+                ->user();
 
-        $user = User::updateOrCreate(
-            [
-                'email' => $googleUser->email
-            ],
-            [
-                'name' => $googleUser->name,
-                'google_id' => $googleUser->id,
-                'password' => bcrypt(Str::random(16))
-            ]
-        );
+            // 2. Vérifier que l'email est présent et vérifié
+            if (!$googleUser->email) {
+                return redirect('http://localhost:3000/login')
+                    ->with('error', 'Email non fourni par Google');
+            }
 
-        $token = $user->createToken('auth')->plainTextToken;
+            if (!($googleUser->user['email_verified'] ?? false)) {
+                return redirect('http://localhost:3000/login')
+                    ->with('error', 'Veuillez vérifier votre email avec Google');
+            }
 
-        return redirect(
-            'http://localhost:3000/community?token=' . $token
-        );
+            // 3. Rechercher ou créer l'utilisateur
+            $user = User::where('google_id', $googleUser->id)->first();
+
+            if (!$user) {
+                // Vérifier si l'email existe déjà
+                $existingUser = User::where('email', $googleUser->email)->first();
+
+                if ($existingUser) {
+                    // Lier le compte Google à l'utilisateur existant
+                    $existingUser->update([
+                        'google_id' => $googleUser->id,
+                        'email_verified_at' => now(),
+                    ]);
+                    $user = $existingUser;
+                } else {
+                    // Créer un nouvel utilisateur
+                    $user = User::create([
+                        'name' => $googleUser->name ?? 'Utilisateur',
+                        'email' => $googleUser->email,
+                        'google_id' => $googleUser->id,
+                        'password' => Hash::make(Str::random(32)),
+                        'email_verified_at' => now(),
+                    ]);
+                }
+            }
+
+            // 4. Créer le token
+            $token = $user->createToken('auth-token')->plainTextToken;
+
+            // 5. Rediriger avec le token
+            return redirect('http://localhost:3000/community')
+                ->with('auth_token', $token)
+                ->with('user', [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ]);
+        } catch (Exception $e) {
+            // 6. Gérer les erreurs
+            Log::error('Google OAuth Error: ' . $e->getMessage());
+
+            return redirect('http://localhost:3000/login')
+                ->with('error', 'Erreur lors de la connexion avec Google');
+        }
     }
 }

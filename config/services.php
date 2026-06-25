@@ -49,4 +49,10 @@ return [
         'temperature'   => env('AI_TEMPERATURE', 0.7),
     ],
 
+
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+        'model' => env('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+    ],
 ];
+

@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Post;
 use App\Models\Like;
 use App\Models\CommunityNotification;
+use App\Models\ModerationPost;
+use App\Services\Moderation\FastModerationLayer;
+use App\Services\Moderation\SyncModerationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,11 +30,30 @@ class PostController extends Controller
         'application/pdf',
     ];
 
-    // ── Feed paginé ───────────────────────────────────────────────────────────
+    protected FastModerationLayer $fastLayer;
+    protected SyncModerationService $syncModeration;
+
+    public function __construct(
+        FastModerationLayer $fastLayer,
+        SyncModerationService $syncModeration
+    ) {
+        $this->fastLayer = $fastLayer;
+        $this->syncModeration = $syncModeration;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // 1. FEED PAGINÉ
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function index(Request $request): JsonResponse
     {
-        $user  = $request->user();
-        $posts = Post::with(['author.profile', 'sharedPost.author'])
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
+        }
+
+        $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
             ->feed($user->id)
             ->paginate(15);
 
@@ -40,19 +62,33 @@ class PostController extends Controller
         return response()->json(['success' => true, 'data' => $posts]);
     }
 
-    // ── Créer un post ─────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 2. CRÉER UN POST AVEC MODÉRATION EN TEMPS RÉEL
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function store(Request $request): JsonResponse
     {
-
         Log::info('=== STORE POST ===', [
             'files'   => array_keys($request->allFiles()),
             'content' => $request->content,
             'type'    => $request->type,
         ]);
 
-        // ── Validation minimale (pas de règle sur media) ──────────────────────
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
+        }
+
+        if (!$user->canPublish()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Vous ne pouvez pas publier pour le moment. Trop de contenus rejetés ou en attente.',
+            ], 403);
+        }
+
         $validator = Validator::make($request->all(), [
-            'content'        => 'nullable|string|max:5000',
+            'content'        => 'nullable|string|max:20000',
             'type'           => 'nullable|string|in:text,image,video,pdf,shared,announcement',
             'shared_post_id' => 'nullable|exists:posts,id',
         ]);
@@ -64,7 +100,6 @@ class PostController extends Controller
             ], 422);
         }
 
-        // ── Au moins content ou un fichier ────────────────────────────────────
         $hasContent = !empty(trim($request->content ?? ''));
         $hasFiles   = count($request->allFiles()) > 0;
 
@@ -75,124 +110,206 @@ class PostController extends Controller
             ], 422);
         }
 
-        DB::beginTransaction();
+        // ✅ Séparer la création du post de la modération
+        $post = null;
+        $moderationStatus = 'pending';
+        $moderationMessage = 'Publication créée avec succès.';
 
         try {
-            $mediaUrls    = [];
-            $pdfFiles     = [];
-            $detectedType = 'text';
+            // ✅ 1. Créer le post et la modération (dans une transaction)
+            $post = DB::transaction(function () use ($request, $user) {
+                $mediaUrls    = [];
+                $pdfFiles     = [];
+                $detectedType = 'text';
 
-            // ── Collecter les fichiers ────────────────────────────────────────
-            $uploaded = [];
-            $allFiles = $request->allFiles();
+                // ── Upload des fichiers ──────────────────────────────────────────
+                $uploaded = [];
+                $allFiles = $request->allFiles();
 
-            foreach ($allFiles as $key => $files) {
-                $files = is_array($files) ? $files : [$files];
-                foreach ($files as $file) {
-                    $uploaded[] = $file;
-                }
-            }
-
-            Log::info('Fichiers collectés:', ['count' => count($uploaded)]);
-
-            // ── Uploader chaque fichier ───────────────────────────────────────
-            foreach ($uploaded as $index => $file) {
-                if (!$file || !$file->isValid()) {
-                    Log::warning("Fichier invalide à l'index $index");
-                    continue;
-                }
-
-                $mimeType = $file->getMimeType();
-                Log::info("Fichier $index:", ['name' => $file->getClientOriginalName(), 'mime' => $mimeType, 'size' => $file->getSize()]);
-
-                if (!in_array($mimeType, self::ALLOWED_MIMES)) {
-                    Log::warning("MIME non autorisé: $mimeType");
-                    continue;
-                }
-
-                $isImage = str_starts_with($mimeType, 'image/');
-                $isVideo = str_starts_with($mimeType, 'video/');
-                $isPdf   = $mimeType === 'application/pdf';
-
-                // Vérification taille
-                $maxBytes = $isVideo ? 200 * 1024 * 1024
-                    : ($isPdf  ? 20  * 1024 * 1024
-                        : 10  * 1024 * 1024);
-
-                if ($file->getSize() > $maxBytes) {
-                    DB::rollBack();
-                    return response()->json([
-                        'success' => false,
-                        'message' => "Fichier \"{$file->getClientOriginalName()}\" trop volumineux.",
-                    ], 422);
-                }
-
-                $folder    = $isVideo ? 'community/videos'
-                    : ($isPdf  ? 'community/pdfs'
-                        : 'community/posts');
-
-                $extension = $file->getClientOriginalExtension() ?: 'bin';
-                $filename  = uniqid() . '_' . time() . '_' . $index . '.' . $extension;
-                $path      = $file->storeAs($folder, $filename, 'public');
-
-                if (!$path) {
-                    Log::error("Échec stockage fichier $index");
-                    continue;
-                }
-
-                $url = asset('storage/' . $path);
-
-                if ($isPdf) {
-                    $pdfFiles[] = [
-                        'url'        => $url,
-                        'name'       => $file->getClientOriginalName(),
-                        'size'       => $file->getSize(),
-                        'size_label' => $this->formatBytes($file->getSize()),
-                        'pages'      => null,
-                    ];
-                    if ($detectedType === 'text') $detectedType = 'pdf';
-                } else {
-                    $mediaUrls[] = $url;
-                    if ($detectedType === 'text') {
-                        $detectedType = $isVideo ? 'video' : 'image';
+                foreach ($allFiles as $key => $files) {
+                    $files = is_array($files) ? $files : [$files];
+                    foreach ($files as $file) {
+                        $uploaded[] = $file;
                     }
                 }
 
-                Log::info("Fichier uploadé:", ['url' => $url, 'type' => $detectedType]);
+                foreach ($uploaded as $index => $file) {
+                    if (!$file || !$file->isValid()) {
+                        Log::warning("Fichier invalide à l'index $index");
+                        continue;
+                    }
+
+                    $mimeType = $file->getMimeType();
+
+                    if (!in_array($mimeType, self::ALLOWED_MIMES)) {
+                        Log::warning("MIME non autorisé: $mimeType");
+                        continue;
+                    }
+
+                    $isImage = str_starts_with($mimeType, 'image/');
+                    $isVideo = str_starts_with($mimeType, 'video/');
+                    $isPdf   = $mimeType === 'application/pdf';
+
+                    $maxBytes = $isVideo ? 200 * 1024 * 1024
+                        : ($isPdf  ? 20  * 1024 * 1024
+                            : 10  * 1024 * 1024);
+
+                    if ($file->getSize() > $maxBytes) {
+                        throw new \Exception("Fichier \"{$file->getClientOriginalName()}\" trop volumineux.");
+                    }
+
+                    $folder    = $isVideo ? 'community/videos'
+                        : ($isPdf  ? 'community/pdfs'
+                            : 'community/posts');
+
+                    $extension = $file->getClientOriginalExtension() ?: 'bin';
+                    $filename  = uniqid() . '_' . time() . '_' . $index . '.' . $extension;
+                    $path      = $file->storeAs($folder, $filename, 'public');
+
+                    if (!$path) {
+                        continue;
+                    }
+
+                    $url = asset('storage/' . $path);
+
+                    if ($isPdf) {
+                        $pdfFiles[] = [
+                            'url'        => $url,
+                            'name'       => $file->getClientOriginalName(),
+                            'size'       => $file->getSize(),
+                            'size_label' => $this->formatBytes($file->getSize()),
+                            'pages'      => null,
+                        ];
+                        if ($detectedType === 'text') $detectedType = 'pdf';
+                    } else {
+                        $mediaUrls[] = $url;
+                        if ($detectedType === 'text') {
+                            $detectedType = $isVideo ? 'video' : 'image';
+                        }
+                    }
+                }
+
+                $postType = $request->type ?? $detectedType;
+                if ($postType === 'text' && (count($mediaUrls) > 0 || count($pdfFiles) > 0)) {
+                    $postType = $detectedType;
+                }
+
+                // ── Création du post ──────────────────────────────────────────────
+                $post = Post::create([
+                    'user_id'        => $user->id,
+                    'content'        => trim($request->content ?? ''),
+                    'type'           => $postType,
+                    'media_urls'     => $mediaUrls,
+                    'pdf_files'      => $pdfFiles,
+                    'shared_post_id' => $request->shared_post_id,
+                    'likes_count'    => 0,
+                    'comments_count' => 0,
+                    'shares_count'   => 0,
+                ]);
+
+                // ── Création de la modération (pending) ─────────────────────────
+                $moderation = ModerationPost::create([
+                    'post_id' => $post->id,
+                    'status' => 'pending',
+                    'content_hash' => $post->generateContentHash(),
+                ]);
+
+                return $post;
+            });
+
+            // ✅ 2. Modération (HORS transaction)
+            // Le post existe maintenant, on peut le modérer sans bloquer la transaction
+            try {
+                // Fast Moderation Layer
+                $fastDecision = $this->fastLayer->check($post->content, $user->id);
+
+                if ($fastDecision !== null) {
+                    // Décision rapide
+                    $moderationStatus = $fastDecision;
+                    $moderationMessage = $this->getModerationMessage($fastDecision);
+
+                    $post->moderation->update([
+                        'status' => $fastDecision,
+                        'moderated_at' => now(),
+                        'reason' => $fastDecision === 'rejected' 
+                            ? 'Contenu rejeté par les filtres automatiques' 
+                            : 'Contenu approuvé par les filtres automatiques',
+                    ]);
+
+                    $post->moderation->auditLogs()->create([
+                        'action' => $fastDecision,
+                        'actor_type' => 'system',
+                        'actor_id' => null,
+                        'payload' => [
+                            'reason' => 'Fast moderation layer decision',
+                            'rule' => $fastDecision === 'rejected' ? 'blocklist/rate_limit' : 'duplicate',
+                        ],
+                        'created_at' => now(),
+                    ]);
+
+                } else {
+                    // Analyse IA synchrone
+                    $moderationResult = $this->syncModeration->moderatePostSync($post);
+                    $moderationStatus = $moderationResult['status'];
+                    $moderationMessage = $this->getModerationMessage($moderationResult['status']);
+
+                    $post->moderation->update([
+                        'status' => $moderationStatus,
+                        'toxicity_score' => $moderationResult['scores']['toxicity'] ?? 0,
+                        'spam_score' => $moderationResult['scores']['spam'] ?? 0,
+                        'hate_score' => $moderationResult['scores']['hate'] ?? 0,
+                        'violence_score' => $moderationResult['scores']['violence'] ?? 0,
+                        'reason' => $moderationResult['reason'] ?? null,
+                        'moderated_at' => now(),
+                        'result_raw' => $moderationResult,
+                    ]);
+                }
+
+            } catch (\Exception $e) {
+                Log::error('Erreur modération', [
+                    'post_id' => $post->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                // ✅ Fallback : mettre en review
+                $post->moderation->update([
+                    'status' => 'review',
+                    'reason' => 'Erreur technique, vérification manuelle requise',
+                    'moderated_at' => now(),
+                ]);
+
+                $moderationStatus = 'review';
+                $moderationMessage = 'Publication créée, en cours de vérification manuelle.';
             }
 
-            // ── Type final ────────────────────────────────────────────────────
-            $postType = $request->type ?? $detectedType;
-            if ($postType === 'text' && (count($mediaUrls) > 0 || count($pdfFiles) > 0)) {
-                $postType = $detectedType;
-            }
+            $post->load(['author.profile', 'sharedPost.author', 'moderation']);
 
-            // ── Création ──────────────────────────────────────────────────────
-            $post = Post::create([
-                'user_id'        => $request->user()->id,
-                'content'        => trim($request->content ?? ''),
-                'type'           => $postType,
-                'media_urls'     => $mediaUrls,
-                'pdf_files'      => $pdfFiles,
-                'shared_post_id' => $request->shared_post_id,
-                'likes_count'    => 0,
-                'comments_count' => 0,
-                'shares_count'   => 0,
+            Log::info('Post créé:', [
+                'id' => $post->id,
+                'type' => $post->type,
+                'moderation_status' => $moderationStatus,
             ]);
 
-            DB::commit();
-
-            $post->load(['author.profile', 'sharedPost.author']);
-
-            Log::info('Post créé:', ['id' => $post->id, 'type' => $postType]);
+            $responseData = $this->formatPost($post, $user->id);
+            $responseData['moderation'] = [
+                'status' => $post->moderation_status,
+                'reason' => $post->moderation_reason,
+                'scores' => [
+                    'toxicity' => $post->toxicity_score,
+                    'spam' => $post->spam_score,
+                    'hate' => $post->hate_score,
+                    'violence' => $post->violence_score,
+                ],
+            ];
 
             return response()->json([
                 'success' => true,
-                'message' => 'Publication créée avec succès.',
-                'data'    => $this->formatPost($post, $request->user()->id),
+                'message' => $moderationMessage,
+                'data' => $responseData,
+                'moderation_status' => $moderationStatus,
             ], 201);
+
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Erreur store post: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
 
             return response()->json([
@@ -202,54 +319,125 @@ class PostController extends Controller
         }
     }
 
-    // ── Voir un post ──────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 3. VOIR UN POST
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function show(Request $request, int $id): JsonResponse
     {
-        $post = Post::with(['author.profile', 'sharedPost.author'])->findOrFail($id);
+        $user = $request->user();
+
+        $post = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+            ->findOrFail($id);
+
+        if (!$post->isVisible() && $post->user_id !== $user?->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cette publication n\'est pas disponible.',
+            ], 404);
+        }
 
         return response()->json([
             'success' => true,
-            'data'    => $this->formatPost($post, $request->user()->id),
+            'data'    => $this->formatPost($post, $user?->id),
         ]);
     }
 
-    // ── Modifier un post ──────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 4. MODIFIER UN POST
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function update(Request $request, int $id): JsonResponse
     {
         $post = Post::findOrFail($id);
+        $user = $request->user();
 
-        if ($post->user_id !== $request->user()->id) {
+        if (!$user || $post->user_id !== $user->id) {
             return response()->json(['success' => false, 'message' => 'Action non autorisée.'], 403);
         }
 
         $validator = Validator::make($request->all(), [
-            'content' => 'required|string|max:5000',
+            'content' => 'required|string|max:20000',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $post->update(['content' => $request->content]);
+        DB::beginTransaction();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Publication mise à jour.',
-            'data'    => $this->formatPost($post->fresh(['author.profile']), $request->user()->id),
-        ]);
+        try {
+            $post->update(['content' => $request->content]);
+
+            if ($post->moderation) {
+                $post->moderation->update([
+                    'status' => 'pending',
+                    'moderated_at' => null,
+                    'toxicity_score' => null,
+                    'spam_score' => null,
+                    'hate_score' => null,
+                    'violence_score' => null,
+                    'result_raw' => null,
+                    'reason' => null,
+                    'content_hash' => $post->generateContentHash(),
+                ]);
+            }
+
+            DB::commit();
+
+            // ✅ Modération HORS transaction
+            try {
+                $moderationResult = $this->syncModeration->moderatePostSync($post);
+                if ($post->moderation) {
+                    $post->moderation->update([
+                        'status' => $moderationResult['status'],
+                        'toxicity_score' => $moderationResult['scores']['toxicity'] ?? 0,
+                        'spam_score' => $moderationResult['scores']['spam'] ?? 0,
+                        'hate_score' => $moderationResult['scores']['hate'] ?? 0,
+                        'violence_score' => $moderationResult['scores']['violence'] ?? 0,
+                        'reason' => $moderationResult['reason'] ?? null,
+                        'moderated_at' => now(),
+                        'result_raw' => $moderationResult,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error('Erreur réanalyse', ['post_id' => $post->id, 'error' => $e->getMessage()]);
+                if ($post->moderation) {
+                    $post->moderation->update([
+                        'status' => 'review',
+                        'reason' => 'Erreur technique, vérification manuelle requise',
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Publication mise à jour.',
+                'data'    => $this->formatPost($post->fresh(['author.profile', 'moderation']), $user->id),
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur serveur: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
-    // ── Supprimer un post ─────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 5. SUPPRIMER UN POST
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function destroy(Request $request, int $id): JsonResponse
     {
         $post = Post::findOrFail($id);
         $user = $request->user();
 
-        if ($post->user_id !== $user->id && !$user->isAdmin()) {
+        if (!$user || ($post->user_id !== $user->id && !$user->isAdmin())) {
             return response()->json(['success' => false, 'message' => 'Action non autorisée.'], 403);
         }
 
-        // Supprimer les fichiers physiques
         foreach (array_merge($post->media_urls ?? [], array_column($post->pdf_files ?? [], 'url')) as $url) {
             try {
                 $path = str_replace('/storage/', '', parse_url($url, PHP_URL_PATH));
@@ -261,16 +449,31 @@ class PostController extends Controller
             }
         }
 
+        if ($post->moderation) {
+            $post->moderation->delete();
+        }
+
         $post->delete();
 
         return response()->json(['success' => true, 'message' => 'Publication supprimée.']);
     }
 
-    // ── Like / Unlike ─────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 6. LIKE / UNLIKE
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function toggleLike(Request $request, int $id): JsonResponse
     {
         $post = Post::findOrFail($id);
         $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
+        }
+
+        if (!$post->isVisible()) {
+            return response()->json(['success' => false, 'message' => 'Cette publication n\'est pas disponible.'], 404);
+        }
 
         $like = Like::where([
             'user_id'       => $user->id,
@@ -310,20 +513,107 @@ class PostController extends Controller
         ]);
     }
 
-    // ── Posts d'un utilisateur ────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 7. POSTS D'UN UTILISATEUR
+    // ────────────────────────────────────────────────────────────────────────────
+
     public function userPosts(Request $request, int $userId): JsonResponse
     {
-        $posts = Post::with(['author.profile', 'sharedPost.author'])
+        $user = $request->user();
+
+        $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
             ->where('user_id', $userId)
+            ->whereHas('moderation', function ($query) {
+                $query->where('status', 'approved');
+            })
             ->latest()
             ->paginate(12);
 
-        $posts->getCollection()->transform(fn($post) => $this->formatPost($post, $request->user()->id));
+        $posts->getCollection()->transform(fn($post) => $this->formatPost($post, $user?->id));
 
         return response()->json(['success' => true, 'data' => $posts]);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────────
+    // 8. POSTS EN ATTENTE DE MODÉRATION
+    // ────────────────────────────────────────────────────────────────────────────
+
+    public function pendingPosts(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
+        }
+
+        $posts = Post::with(['author.profile', 'moderation'])
+            ->where('user_id', $user->id)
+            ->whereHas('moderation', function ($query) {
+                $query->whereIn('status', ['pending', 'review']);
+            })
+            ->latest()
+            ->paginate(12);
+
+        $posts->getCollection()->transform(fn($post) => $this->formatPost($post, $user->id));
+
+        return response()->json(['success' => true, 'data' => $posts]);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // 9. RÉANALYSER UN POST
+    // ────────────────────────────────────────────────────────────────────────────
+
+    public function reanalyze(Request $request, int $id): JsonResponse
+    {
+        $post = Post::findOrFail($id);
+        $user = $request->user();
+
+        if (!$user || ($post->user_id !== $user->id && !$user->isAdmin())) {
+            return response()->json(['success' => false, 'message' => 'Action non autorisée.'], 403);
+        }
+
+        if (!$post->moderation) {
+            return response()->json(['success' => false, 'message' => 'Aucune modération trouvée.'], 404);
+        }
+
+        try {
+            $moderationResult = $this->syncModeration->moderatePostSync($post);
+
+            $post->moderation->update([
+                'status' => $moderationResult['status'],
+                'toxicity_score' => $moderationResult['scores']['toxicity'] ?? 0,
+                'spam_score' => $moderationResult['scores']['spam'] ?? 0,
+                'hate_score' => $moderationResult['scores']['hate'] ?? 0,
+                'violence_score' => $moderationResult['scores']['violence'] ?? 0,
+                'reason' => $moderationResult['reason'] ?? null,
+                'moderated_at' => now(),
+                'result_raw' => $moderationResult,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Réanalyse effectuée avec succès.',
+                'data' => [
+                    'moderation' => [
+                        'status' => $moderationResult['status'],
+                        'reason' => $moderationResult['reason'],
+                        'scores' => $moderationResult['scores'],
+                    ],
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erreur réanalyse: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la réanalyse: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // 10. HELPERS
+    // ────────────────────────────────────────────────────────────────────────────
 
     private function formatBytes(int $bytes): string
     {
@@ -332,9 +622,9 @@ class PostController extends Controller
         return $bytes . ' o';
     }
 
-    private function formatPost(Post $post, int $authUserId): array
+    private function formatPost(Post $post, ?int $authUserId): array
     {
-        return [
+        $data = [
             'id'             => $post->id,
             'content'        => $post->content,
             'type'           => $post->type,
@@ -347,10 +637,27 @@ class PostController extends Controller
             'likes_count'    => $post->likes_count,
             'comments_count' => $post->comments_count,
             'shares_count'   => $post->shares_count,
-            'is_liked'       => $post->isLikedBy($authUserId),
+            'is_liked'       => $authUserId ? $post->isLikedBy($authUserId) : false,
             'created_at'     => $post->created_at,
             'updated_at'     => $post->updated_at,
+            'moderation_status' => $post->moderation_status,
         ];
+
+        if ($authUserId && ($post->user_id === $authUserId)) {
+            $data['moderation'] = [
+                'status' => $post->moderation_status,
+                'reason' => $post->moderation_reason,
+                'moderated_at' => $post->moderated_at,
+                'scores' => [
+                    'toxicity' => $post->toxicity_score,
+                    'spam' => $post->spam_score,
+                    'hate' => $post->hate_score,
+                    'violence' => $post->violence_score,
+                ],
+            ];
+        }
+
+        return $data;
     }
 
     private function formatUser($user): array
@@ -374,5 +681,16 @@ class PostController extends Controller
             'headline'  => $user->profile?->headline,
             'role'      => $user->role,
         ];
+    }
+
+    private function getModerationMessage(string $status): string
+    {
+        return match ($status) {
+            'approved' => '✅ Publication approuvée et visible immédiatement.',
+            'review' => '🔍 Publication en cours de vérification manuelle.',
+            'rejected' => '❌ Publication rejetée car elle enfreint les règles.',
+            'pending' => '⏳ Publication en attente d\'analyse.',
+            default => 'Publication créée.',
+        };
     }
 }
