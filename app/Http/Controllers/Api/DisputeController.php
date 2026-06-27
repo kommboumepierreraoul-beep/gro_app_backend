@@ -15,11 +15,14 @@ use App\Mail\DisputeRespondedMail;
 use App\Mail\DisputeResolvedMail;
 use App\Mail\DisputeEscalatedMail;
 use App\Mail\NewDisputeMessageMail;
+<<<<<<< HEAD
 use App\Notifications\DisputeCreatedNotification;
 use App\Notifications\DisputeRespondedNotification;
 use App\Notifications\DisputeEscalatedNotification;
 use App\Notifications\DisputeResolvedNotification;
 use App\Notifications\DisputeMessageNotification;
+=======
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
 
 class DisputeController extends Controller
 {
@@ -27,7 +30,11 @@ class DisputeController extends Controller
     public function index(Request $request)
     {
         $disputes = Dispute::where('user_id', $request->user()->id)
+<<<<<<< HEAD
             ->with(['order.items.product', 'seller.profile'])
+=======
+            ->with(['order', 'seller'])
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             ->orderBy('created_at', 'desc')
             ->get();
         return response()->json(['data' => $disputes]);
@@ -37,7 +44,11 @@ class DisputeController extends Controller
     public function sellerDisputes(Request $request)
     {
         $disputes = Dispute::where('seller_id', $request->user()->id)
+<<<<<<< HEAD
             ->with(['order.items.product', 'user.profile'])
+=======
+            ->with(['order', 'user'])
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             ->orderBy('created_at', 'desc')
             ->get();
         return response()->json(['data' => $disputes]);
@@ -47,10 +58,17 @@ class DisputeController extends Controller
     public function adminDisputes(Request $request)
     {
         $user = $request->user();
+<<<<<<< HEAD
         if (!$user->isAdmin()) {
             return response()->json(['message' => 'Non autorisé'], 403);
         }
         $disputes = Dispute::with(['order.items.product', 'user', 'seller'])
+=======
+        if ($user->role !== 'admin') {
+            return response()->json(['message' => 'Non autorisé'], 403);
+        }
+        $disputes = Dispute::with(['order', 'user', 'seller'])
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             ->orderBy('created_at', 'desc')
             ->get();
         return response()->json(['data' => $disputes]);
@@ -67,7 +85,11 @@ class DisputeController extends Controller
         ]);
 
         $user = $request->user();
+<<<<<<< HEAD
         $order = Order::with('shop')->where('id', $request->order_id)
+=======
+        $order = Order::where('id', $request->order_id)
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             ->where('user_id', $user->id)
             ->first();
 
@@ -75,7 +97,11 @@ class DisputeController extends Controller
             return response()->json(['message' => 'Commande non trouvée'], 404);
         }
 
+<<<<<<< HEAD
         if (!in_array($order->status, ['shipping', 'delivered', 'paid', 'completed'])) {
+=======
+        if (!in_array($order->status, ['shipping', 'delivered', 'paid'])) {
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             return response()->json(['message' => 'Litige possible uniquement pour les commandes en cours ou livrées'], 422);
         }
 
@@ -89,6 +115,7 @@ class DisputeController extends Controller
         $dispute = Dispute::create([
             'order_id' => $order->id,
             'user_id' => $user->id,
+<<<<<<< HEAD
             'seller_id' => $order->shop->user_id,
             'reason' => $request->reason,
             'description' => $request->description,
@@ -103,13 +130,22 @@ class DisputeController extends Controller
                 }
                 return $urls;
             })(),
+=======
+            'seller_id' => $order->seller_id,
+            'reason' => $request->reason,
+            'description' => $request->description,
+            'attachments' => $request->attachments,
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             'status' => 'pending',
             'mode' => 'amiable',
         ]);
 
         try {
             Mail::to($dispute->seller->email)->send(new DisputeCreatedMail($dispute));
+<<<<<<< HEAD
             $dispute->seller->notify(new DisputeCreatedNotification($dispute));
+=======
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             Mail::to(config('mail.admin_address', 'admin@agriconnect.com'))->send(new DisputeCreatedMail($dispute));
         } catch (\Exception $e) {
             Log::error('Email litige échoué : ' . $e->getMessage());
@@ -145,7 +181,10 @@ class DisputeController extends Controller
 
         try {
             Mail::to($dispute->user->email)->send(new DisputeRespondedMail($dispute));
+<<<<<<< HEAD
             $dispute->user->notify(new DisputeRespondedNotification($dispute));
+=======
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             Mail::to(config('mail.admin_address', 'admin@agriconnect.com'))->send(new DisputeRespondedMail($dispute));
         } catch (\Exception $e) {
             Log::error('Email réponse litige échoué : ' . $e->getMessage());
@@ -161,12 +200,20 @@ class DisputeController extends Controller
         if (!$user) {
             return response()->json(['message' => 'Non authentifié'], 401);
         }
+<<<<<<< HEAD
         if ($user->id !== $dispute->user_id && $user->id !== $dispute->seller_id && !$user->isAdmin()) {
+=======
+        if ($user->id !== $dispute->user_id && $user->id !== $dispute->seller_id && $user->role !== 'admin') {
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             return response()->json(['message' => 'Non autorisé'], 403);
         }
 
         $messages = DisputeMessage::where('dispute_id', $dispute->id)
+<<<<<<< HEAD
             ->with('user.profile')
+=======
+            ->with('user')
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             ->orderBy('created_at', 'asc')
             ->get();
 
@@ -180,7 +227,11 @@ class DisputeController extends Controller
         if (!$user) {
             return response()->json(['message' => 'Non authentifié'], 401);
         }
+<<<<<<< HEAD
         if ($user->id !== $dispute->user_id && $user->id !== $dispute->seller_id && !$user->isAdmin()) {
+=======
+        if ($user->id !== $dispute->user_id && $user->id !== $dispute->seller_id && $user->role !== 'admin') {
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             return response()->json(['message' => 'Non autorisé'], 403);
         }
 
@@ -193,6 +244,7 @@ class DisputeController extends Controller
             'dispute_id' => $dispute->id,
             'user_id' => $user->id,
             'message' => $request->message,
+<<<<<<< HEAD
             
             'attachments' => (function() use ($request) {
                 $urls = [];
@@ -204,6 +256,9 @@ class DisputeController extends Controller
                 }
                 return $urls;
             })(),
+=======
+            'attachments' => $request->attachments,
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
         ]);
 
         if ($dispute->status === 'pending') {
@@ -211,6 +266,7 @@ class DisputeController extends Controller
             $dispute->save();
         }
 
+<<<<<<< HEAD
         if ($user->isAdmin()) {
             $recipients = [$dispute->user, $dispute->seller];
         } else {
@@ -226,6 +282,11 @@ class DisputeController extends Controller
                     $recipient->notify(new DisputeMessageNotification($dispute, $senderName));
                 }
             }
+=======
+        $recipient = ($user->id === $dispute->user_id) ? $dispute->seller : $dispute->user;
+        try {
+            Mail::to($recipient->email)->queue(new NewDisputeMessageMail($dispute, $message));
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
         } catch (\Exception $e) {
             Log::error('Email nouveau message échoué : ' . $e->getMessage());
         }
@@ -254,6 +315,7 @@ class DisputeController extends Controller
         $dispute->save();
 
         try {
+<<<<<<< HEAD
             $dispute->user->notify(new DisputeEscalatedNotification($dispute));
             $dispute->seller->notify(new DisputeEscalatedNotification($dispute));
 
@@ -262,6 +324,9 @@ class DisputeController extends Controller
                 $admin->notify(new DisputeEscalatedNotification($dispute));
                 Mail::to($admin->email)->send(new DisputeEscalatedMail($dispute));
             }
+=======
+            Mail::to(config('mail.admin_address', 'admin@agriconnect.com'))->send(new DisputeEscalatedMail($dispute));
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
         } catch (\Exception $e) {
             Log::error('Email escalade échoué : ' . $e->getMessage());
         }
@@ -313,7 +378,11 @@ class DisputeController extends Controller
     public function askSellerQuestion(Request $request, Dispute $dispute)
     {
         $user = auth()->user();
+<<<<<<< HEAD
         if (!$user || !$user->isAdmin()) {
+=======
+        if (!$user || $user->role !== 'admin') {
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             return response()->json(['message' => 'Non autorisé'], 403);
         }
 
@@ -335,7 +404,11 @@ class DisputeController extends Controller
     public function resolve(Request $request, Dispute $dispute)
     {
         $user = $request->user();
+<<<<<<< HEAD
         if (!$user->isAdmin()) {
+=======
+        if ($user->role !== 'admin') {
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             return response()->json(['message' => 'Non autorisé'], 403);
         }
 
@@ -378,9 +451,13 @@ class DisputeController extends Controller
 
             try {
                 Mail::to($dispute->user->email)->send(new DisputeResolvedMail($dispute));
+<<<<<<< HEAD
                 $dispute->user->notify(new DisputeResolvedNotification($dispute));
                 Mail::to($dispute->seller->email)->send(new DisputeResolvedMail($dispute));
                 $dispute->seller->notify(new DisputeResolvedNotification($dispute));
+=======
+                Mail::to($dispute->seller->email)->send(new DisputeResolvedMail($dispute));
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
             } catch (\Exception $e) {
                 Log::error('Email résolution litige échoué : ' . $e->getMessage());
             }
@@ -396,10 +473,17 @@ class DisputeController extends Controller
         if (!$user) {
             return response()->json(['message' => 'Non authentifié'], 401);
         }
+<<<<<<< HEAD
         if ($user->id !== $dispute->user_id && $user->id !== $dispute->seller_id && !$user->isAdmin()) {
             return response()->json(['message' => 'Non autorisé'], 403);
         }
         $dispute->load(['order.items.product', 'user.profile', 'seller.profile', 'resolver']);
+=======
+        if ($user->id !== $dispute->user_id && $user->id !== $dispute->seller_id && $user->role !== 'admin') {
+            return response()->json(['message' => 'Non autorisé'], 403);
+        }
+        $dispute->load(['order', 'user', 'seller', 'resolver']);
+>>>>>>> 9a5ebbd473ed8da6d7209a514372a33f63ea9ac2
         return response()->json(['data' => $dispute]);
     }
 }
