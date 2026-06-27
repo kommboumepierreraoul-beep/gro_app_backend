@@ -8,6 +8,8 @@ use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\ProductApprovedMail;
+use App\Notifications\ProductApproved;
+use App\Notifications\ProductRejected;
 use App\Mail\ProductRejectedMail;
 
 class AdminProductController extends Controller
@@ -83,6 +85,7 @@ public function approveProduct($id)
                 )
 
             );
+        $product->shop->user->notify(new \App\Notifications\ProductApproved($product->name));
     }
 
     return response()->json([
@@ -141,6 +144,7 @@ public function rejectProduct(Request $request, $id)
 
             );
     }
+        $product->shop->user->notify(new \App\Notifications\ProductRejected($product->name, $request->reason ?? ''));
 
     return response()->json([
         'success' => true,

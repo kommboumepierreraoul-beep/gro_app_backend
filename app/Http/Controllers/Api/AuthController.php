@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
@@ -222,9 +223,10 @@ class AuthController extends Controller
      */
     public function profile(Request $request): JsonResponse
     {
+        $user = $request->user()->load('profile');
         return response()->json([
             'success' => true,
-            'user'    => $request->user(),
+            'user'    => $user,
         ]);
     }
 
@@ -239,7 +241,7 @@ class AuthController extends Controller
             'firstname' => 'sometimes|string|max:255',
             'lastname'  => 'sometimes|string|max:255',
             'phone'     => 'sometimes|nullable|string|max:20',
-            'avatar'    => 'sometimes|nullable|url',
+            'avatar'    => 'sometimes|nullable|image|mimes:jpg,jpeg,png,webp|max:4096',
         ]);
 
         if ($validator->fails()) {
@@ -247,7 +249,18 @@ class AuthController extends Controller
         }
 
         try {
-            $user->update($request->only('firstname', 'lastname', 'phone', 'avatar'));
+            $user->update($request->only('firstname', 'lastname', 'phone'));
+
+            if ($request->hasFile('avatar')) {
+                $profile = $user->profile ?? $user->profile()->create([]);
+                if ($profile->avatar) {
+                    Storage::disk('public')->delete($profile->avatar);
+                }
+                $path = $request->file('avatar')->store('avatars', 'public');
+                $profile->update(['avatar' => $path]);
+            }
+
+            $user->load('profile');
 
             return response()->json([
                 'success' => true,

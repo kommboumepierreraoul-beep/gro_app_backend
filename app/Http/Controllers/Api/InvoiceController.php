@@ -29,7 +29,7 @@ class InvoiceController extends Controller
         $user = $request->user();
         $isClient = ($user->id === $order->user_id);
         $isSeller = ($user->id === $order->shop->user_id);
-        $isAdmin = ($user->role === 'admin');
+        $isAdmin = $user->isAdmin();
 
         if (!$isClient && !$isSeller && !$isAdmin) {
             return response()->json(['message' => 'Non autorisé'], 403);

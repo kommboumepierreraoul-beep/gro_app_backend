@@ -90,10 +90,11 @@ class User extends Authenticatable implements MustVerifyEmail
     public const ROLE_USER = 'user';
     public const ROLE_FOURNISSEUR = 'fournisseur';
 
-    protected $fillable = ['firstname', 'lastname', 'email', 'password', 'phone', 'role', 'status', 'email_verified_at'];
+    protected $fillable = ['firstname', 'lastname', 'email', 'password', 'phone', 'role', 'status', 'email_verified_at', 'is_admin'];
     protected $hidden = ['password', 'remember_token'];
     protected $appends = ['full_name'];
-    protected $casts = ['email_verified_at' => 'datetime', 'password' => 'hashed'];
+    protected $casts = ['email_verified_at' => 'datetime', 'password' => 'hashed', 'is_admin' => 'boolean'];
+
 
     public function getFullNameAttribute(): string { return "{$this->firstname} {$this->lastname}"; }
 
@@ -122,7 +123,7 @@ class User extends Authenticatable implements MustVerifyEmail
     public function scopeUsers($query) { return $query->where('role', self::ROLE_USER); }
     public function scopeFournisseurs($query) { return $query->where('role', self::ROLE_FOURNISSEUR); }
 
-    public function isAdmin(): bool { return $this->role === self::ROLE_ADMIN; }
+    public function isAdmin(): bool { return $this->role === self::ROLE_ADMIN || $this->is_admin === true; }
     public function isUser(): bool { return $this->role === self::ROLE_USER; }
     public function isFournisseur(): bool { return $this->role === self::ROLE_FOURNISSEUR; }
 

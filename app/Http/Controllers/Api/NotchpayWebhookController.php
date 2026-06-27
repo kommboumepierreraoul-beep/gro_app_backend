@@ -17,36 +17,48 @@ class NotchpayWebhookController extends Controller
         $event     = $request->input('event') ?? $request->input('type');
         $eventData = $request->input('data', []);
 
+        // Récupération de la référence - TOUS les formats possibles
+        $reference = $eventData['merchant_reference'] 
+                  ?? $eventData['reference'] 
+                  ?? $eventData['trxref'] 
+                  ?? $request->input('reference')
+                  ?? $request->input('merchant_reference')
+                  ?? $request->input('trxref')
+                  ?? null;
+
+        if (!$reference) {
+            Log::error('Notch Pay : Référence manquante', ['payload' => $request->all()]);
+            return response()->json(['status' => 'missing_reference'], 400);
+        }
+
+        Log::info('Notch Pay : Référence trouvée', ['reference' => $reference]);
+
         switch ($event) {
             case 'payment.complete':
-                $this->handlePaymentComplete($eventData);
+            case 'payment.success':
+            case 'transaction.completed':
+                $this->handlePaymentComplete($eventData, $reference);
                 break;
             case 'payment.failed':
-                $this->handlePaymentFailed($eventData);
+            case 'transaction.failed':
+                $this->handlePaymentFailed($eventData, $reference);
                 break;
             case 'payment.created':
-                Log::info('Nouveau paiement créé', ['reference' => $eventData['reference'] ?? '']);
+                Log::info('Nouveau paiement créé', ['reference' => $reference]);
                 break;
             default:
                 Log::info('Événement webhook non géré', ['type' => $event]);
                 break;
         }
 
-        return response()->json(['message' => 'Webhook received'], 200);
+        return response()->json(['status' => 'received'], 200);
     }
 
-    private function handlePaymentComplete(array $data): void
+    private function handlePaymentComplete(array $data, string $reference): void
     {
-        $reference = $data['merchant_reference'] ?? $data['reference'] ?? $data['trxref'] ?? null;
-
         Log::info('handlePaymentComplete', ['reference' => $reference, 'data' => $data]);
 
-        if (!$reference) {
-            Log::error('Notch Pay : Référence manquante dans payment.complete');
-            return;
-        }
-
-        // ✅ CAS 1 : C'est un paiement de commande (reference = ORD-XXXXXXXX)
+        // ✅ CAS 1 : Paiement de commande (reference = ORD-XXXXXXXX)
         if (str_starts_with($reference, 'ORD-')) {
             $order = Order::where('order_number', $reference)->first();
 
@@ -56,22 +68,24 @@ class NotchpayWebhookController extends Controller
             }
 
             if ($order->status !== 'pending') {
-                Log::info('Notch Pay : Commande déjà traitée', ['reference' => $reference]);
+                Log::info('Notch Pay : Commande déjà traitée', ['reference' => $reference, 'status' => $order->status]);
                 return;
             }
 
-            $order->update(['status' => 'paid']);
+            $order->status = 'paid';
+            $order->payment_status = 'completed';
+            $order->payment_reference = $data['id'] ?? $data['reference'] ?? null;
+            $order->save();
 
-            Log::info('Commande payée via Notch Pay', [
+            Log::info('✅ Commande payée via Notch Pay', [
                 'order_id'     => $order->id,
                 'order_number' => $order->order_number,
                 'amount'       => $order->total_amount,
             ]);
-
             return;
         }
 
-        // ✅ CAS 2 : C'est un dépôt wallet (reference = TRX-XXXXXXXX)
+        // ✅ CAS 2 : Dépôt wallet (reference = TRX-XXXXXXXX)
         $transaction = Transaction::where('reference', $reference)->first();
 
         if (!$transaction) {
@@ -86,7 +100,7 @@ class NotchpayWebhookController extends Controller
 
         $wallet = $transaction->wallet;
 
-        if ($transaction->type === 'credit') {
+        if ($transaction->type === 'deposit' || $transaction->type === 'credit') {
             $wallet->balance         += $transaction->amount;
             $wallet->total_credited  += $transaction->amount;
             $wallet->save();
@@ -103,7 +117,7 @@ class NotchpayWebhookController extends Controller
                 ]),
             ]);
 
-            Log::info('Wallet crédité via Notch Pay', [
+            Log::info('✅ Wallet crédité via Notch Pay', [
                 'user_id'     => $transaction->user_id,
                 'amount'      => $transaction->amount,
                 'new_balance' => $wallet->balance,
@@ -111,26 +125,22 @@ class NotchpayWebhookController extends Controller
         }
     }
 
-    private function handlePaymentFailed(array $data): void
+    private function handlePaymentFailed(array $data, string $reference): void
     {
-        $reference = $data['merchant_reference'] ?? $data['reference'] ?? $data['trxref'] ?? null;
+        Log::warning('❌ Paiement Notch Pay échoué', ['reference' => $reference]);
 
-        if (!$reference) {
-            Log::error('Notch Pay : Référence manquante dans payment.failed');
-            return;
-        }
-
-        // Commande échouée
         if (str_starts_with($reference, 'ORD-')) {
-            Log::warning('Paiement commande échoué', ['reference' => $reference]);
+            $order = Order::where('order_number', $reference)->first();
+            if ($order && $order->status === 'pending') {
+                $order->status = 'payment_failed';
+                $order->save();
+                Log::warning('Commande marquée comme paiement échoué', ['order' => $order->id]);
+            }
             return;
         }
 
-        // Transaction wallet échouée
         Transaction::where('reference', $reference)
             ->where('status', 'pending')
             ->update(['status' => 'failed']);
-
-        Log::warning('Paiement Notch Pay échoué', ['reference' => $reference]);
     }
 }

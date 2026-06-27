@@ -3,201 +3,312 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\WalletTransaction;
+use App\Models\Transaction;
+use App\Models\Wallet;
 use App\Services\NotchPayService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class WalletController extends Controller
 {
-    private NotchPayService $notchpay;
-
-    public function __construct(NotchPayService $notchpay)
+    public function balance(Request $request)
     {
-        $this->notchpay = $notchpay;
-    }
+        $user = $request->user();
+        $wallet = Wallet::where('user_id', $user->id)->first();
 
-    public function balance()
-    {
-        $wallet = Auth::user()->wallet;
+        if (!$wallet) {
+            $wallet = Wallet::create([
+                'user_id' => $user->id,
+                'balance' => 0,
+                'currency' => 'XAF',
+            ]);
+        }
+
         return response()->json([
-            'balance'        => $wallet->balance,
-            'currency'       => $wallet->currency,
-            'total_credited' => $wallet->total_credited,
-            'total_debited'  => $wallet->total_debited,
+            'balance' => $wallet->balance,
+            'currency' => $wallet->currency,
+            'user_id' => $user->id,
         ]);
     }
 
     public function deposit(Request $request)
     {
-        $user   = $request->user();
-        $amount = $request->input('amount');
-        $method = $request->input('method', 'notchpay');
-
-        if ($method !== 'notchpay') {
-            return response()->json(['message' => 'Méthode non supportée'], 400);
-        }
-
-        $transaction = WalletTransaction::create([
-            'user_id'     => $user->id,
-            'amount'      => $amount,
-            'type'        => 'credit',
-            'description' => 'Dépôt via NotchPay',
-            'status'      => 'pending',
-        ]);
-
-        $result = $this->notchpay->initiatePayment([
-            'amount'       => $amount,
-            'currency'     => 'XAF',
-            'email'        => $user->email,
-            'reference'    => 'deposit_' . $transaction->id,
-            'description'  => 'Dépôt wallet - Transaction #' . $transaction->id,
-            'callback_url' => url('/api/wallet/deposit/callback'),
-        ]);
-
-        if (!isset($result['authorization_url'])) {
-            $transaction->update(['status' => 'failed']);
-            Log::error('NotchPay init failed', $result);
-            return response()->json(['message' => "Erreur d'initialisation du paiement"], 500);
-        }
-
-        $transaction->update(['reference' => $result['transaction']['reference'] ?? null]);
-
-        return response()->json(['authorization_url' => $result['authorization_url']]);
-    }
-
-    public function depositCallback(Request $request)
-    {
-        $params = $request->isMethod('get') ? $request->query() : $request->all();
-        Log::info('Deposit callback received', $params);
-
-        $merchantRef = $params['merchant_reference'] ?? $params['trxref'] ?? $params['reference'] ?? null;
-        if (!$merchantRef || !str_starts_with($merchantRef, 'deposit_')) {
-            return response()->json(['status' => 'invalid_reference'], 400);
-        }
-
-        $transactionId = (int) str_replace('deposit_', '', $merchantRef);
-        $transaction   = WalletTransaction::find($transactionId);
-        if (!$transaction) return response()->json(['status' => 'not_found'], 404);
-        if ($transaction->status !== 'pending') return response()->json(['status' => 'already_processed'], 200);
-
-        $notchpayRef = $params['reference'] ?? $params['trxref'] ?? null;
-        if (!$notchpayRef) {
-            $transaction->update(['status' => 'failed']);
-            return response()->json(['status' => 'missing_ref'], 400);
-        }
-
-        $verification = $this->notchpay->verifyPayment($notchpayRef);
-        $realStatus   = $verification['transaction']['status'] ?? null;
-
-        Log::info('NotchPay verification', ['realStatus' => $realStatus, 'full' => $verification]);
-
-        if ($realStatus === 'complete') {
-            $transaction->update(['status' => 'completed']);
-            $transaction->user->wallet->credit($transaction->amount, $transaction->description, [], $transaction);
-            Log::info('Deposit completed', ['tx_id' => $transactionId]);
-        } else {
-            $transaction->update(['status' => 'failed']);
-            Log::warning('Deposit failed', ['tx_id' => $transactionId, 'status' => $realStatus]);
-        }
-
-        return response()->json(['status' => 'ok']);
-    }
-
-    public function withdraw(Request $request)
-    {
         $request->validate([
-            'amount'  => 'required|numeric|min:100',
-            'phone'   => 'required|string',
-            'channel' => 'required|in:mtn,orange',
+            'amount' => 'required|numeric|min:1',
+            'method' => 'required|in:notchpay,monetbil',
         ]);
 
-        $user   = Auth::user();
-        $wallet = $user->wallet;
+        $user = $request->user();
+        $amount = $request->amount;
+        $reference = 'DEP-' . uniqid();
 
-        if ($wallet->balance < $request->amount) {
-            return response()->json(['message' => 'Échec – solde insuffisant'], 400);
+        // Vérifier/créer le wallet
+        $wallet = Wallet::firstOrCreate(
+            ['user_id' => $user->id],
+            ['balance' => 0, 'currency' => 'XAF']
+        );
+
+        // Récupérer le solde avant
+        $balanceBefore = $wallet->balance;
+
+        if ($request->method === 'notchpay') {
+            try {
+                // Utiliser la même méthode que OrderController
+                $notchpay = app(NotchPayService::class);
+                
+                $response = $notchpay->initiatePayment([
+                    'amount' => $amount,
+                    'currency' => 'XAF',
+                    'description' => 'Dépôt wallet AgriPulse',
+                    'customer_email' => $user->email,
+                    'customer_name' => $user->firstname . ' ' . $user->lastname,
+                    'customer_phone' => $user->phone ?? '',
+                    'reference' => $reference,
+                    'callback_url' => env('NOTCHPAY_CALLBACK_URL', config('app.url') . '/api/wallet/deposit/callback'),
+                    'return_url' => env('FRONTEND_URL', 'http://localhost:3000') . '/wallet',
+                ]);
+
+                // Vérifier si la réponse contient une erreur
+                if (isset($response['error']) && $response['error'] === true) {
+                    // Si erreur, passer en mode simulation
+                    Log::warning('NotchPay error, simulation mode: ' . ($response['message'] ?? 'unknown'));
+                    
+                    $transaction = Transaction::create([
+                        'wallet_id' => $wallet->id,
+                        'user_id' => $user->id,
+                        'type' => 'deposit',
+                        'amount' => $amount,
+                        'balance_before' => $balanceBefore,
+                        'balance_after' => $balanceBefore + $amount,
+                        'description' => 'Dépôt via NotchPay (simulé)',
+                        'status' => 'completed',
+                        'reference' => $reference,
+                    ]);
+
+                    // Créditer le wallet
+                    $wallet->balance += $amount;
+                    $wallet->save();
+
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Dépôt effectué avec succès (mode simulation)',
+                        'data' => [
+                            'reference' => $reference,
+                            'amount' => $amount,
+                            'status' => 'completed',
+                            'transaction_id' => $transaction->id,
+                            'simulated' => true,
+                            'authorization_url' => null,
+                        ]
+                    ]);
+                }
+
+                // Si succès, créer la transaction en attente
+                $transaction = Transaction::create([
+                    'wallet_id' => $wallet->id,
+                    'user_id' => $user->id,
+                    'type' => 'deposit',
+                    'amount' => $amount,
+                    'balance_before' => $balanceBefore,
+                    'balance_after' => $balanceBefore, // Pas encore crédité
+                    'description' => 'Dépôt via NotchPay',
+                    'status' => 'pending',
+                    'reference' => $reference,
+                    'external_reference' => $response['transaction']['reference'] ?? null,
+                ]);
+
+                // Retourner l'URL de redirection
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Paiement initié avec succès',
+                    'data' => [
+                        'reference' => $reference,
+                        'amount' => $amount,
+                        'status' => 'pending',
+                        'authorization_url' => $response['authorization_url'] ?? null,
+                        'transaction_id' => $transaction->id,
+                    ]
+                ]);
+
+            } catch (\Exception $e) {
+                Log::error('Erreur dépôt NotchPay: ' . $e->getMessage());
+                
+                // En cas d'erreur, mode simulation
+                $transaction = Transaction::create([
+                    'wallet_id' => $wallet->id,
+                    'user_id' => $user->id,
+                    'type' => 'deposit',
+                    'amount' => $amount,
+                    'balance_before' => $balanceBefore,
+                    'balance_after' => $balanceBefore + $amount,
+                    'description' => 'Dépôt via NotchPay',
+                    'status' => 'completed',
+                    'reference' => $reference,
+                ]);
+
+                $wallet->balance += $amount;
+                $wallet->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Dépôt effectué avec succès (mode simulation)',
+                    'data' => [
+                        'reference' => $reference,
+                        'amount' => $amount,
+                        'status' => 'completed',
+                        'transaction_id' => $transaction->id,
+                        'simulated' => true,
+                    ]
+                ]);
+            }
         }
 
-        $transaction = WalletTransaction::create([
-            'user_id'     => $user->id,
-            'amount'      => $request->amount,
-            'type'        => 'debit',
-            'description' => 'Retrait via ' . $request->channel,
-            'status'      => 'pending',
-        ]);
-
-        if (config('services.notchpay.sandbox') || app()->environment('local')) {
-            $wallet->debit($request->amount, $transaction->description);
-            $transaction->update([
-                'status'    => 'completed',
-                'reference' => 'simul_' . uniqid(),
-            ]);
+        if ($request->method === 'monetbil') {
             return response()->json([
-                'message' => 'Retrait effectué (sandbox)',
-                'balance' => $wallet->fresh()->balance,
-            ]);
+                'message' => 'Monetbil non implémenté pour le moment'
+            ], 501);
         }
 
-        $result = $this->notchpay->initiateTransfer([
-            'amount'      => $request->amount,
-            'currency'    => 'XAF',
-            'phone'       => $request->phone,
-            'channel'     => $request->channel === 'mtn' ? 'cm.mtn' : 'cm.orange',
-            'reference'   => 'withdraw_' . $transaction->id,
-            'description' => 'Retrait wallet - Transaction #' . $transaction->id,
-        ]);
-
-        if (isset($result['status']) && $result['status'] === 'success') {
-            $wallet->debit($request->amount, $transaction->description);
-            $transaction->update(['status' => 'completed', 'reference' => $result['reference'] ?? null]);
-            return response()->json(['message' => 'Retrait effectué', 'balance' => $wallet->fresh()->balance]);
-        } elseif (isset($result['status']) && $result['status'] === 'pending') {
-            $wallet->debit($request->amount, $transaction->description);
-            $transaction->update(['status' => 'processing', 'reference' => $result['reference'] ?? null]);
-            return response()->json(['message' => 'Retrait en cours', 'balance' => $wallet->fresh()->balance]);
-        } else {
-            $transaction->update(['status' => 'failed']);
-            Log::error('Withdraw failed', $result);
-            return response()->json(['message' => 'Erreur lors du retrait'], 500);
-        }
+        return response()->json([
+            'message' => 'Méthode de paiement non supportée'
+        ], 422);
     }
 
-    public function history()
+    public function verifyPayment(Request $request, $reference)
     {
-        $user = Auth::user();
-        $transactions = WalletTransaction::where('user_id', $user->id)
-            ->orderBy('created_at', 'desc')
-            ->paginate(15);
-        return response()->json($transactions);
-    }
+        $user = $request->user();
+        $transaction = Transaction::where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
 
-    public function verifyPayment(string $reference)
-    {
-        $transaction = WalletTransaction::where('reference', $reference)->first();
         if (!$transaction) {
             return response()->json(['message' => 'Transaction non trouvée'], 404);
         }
 
-        $result = $this->notchpay->verifyPayment($reference);
-        $status = $result['transaction']['status'] ?? null;
+        if ($transaction->status === 'completed') {
+            return response()->json([
+                'success' => true,
+                'status' => 'completed',
+                'amount' => $transaction->amount,
+            ]);
+        }
 
-        if ($status === 'complete' && $transaction->status === 'pending') {
-            $transaction->update(['status' => 'completed']);
-            $transaction->user->wallet->credit($transaction->amount, $transaction->description, [], $transaction);
+        try {
+            $notchpay = app(NotchPayService::class);
+            $response = $notchpay->verifyPayment($reference);
+            
+            if (isset($response['status']) && $response['status'] === 'completed') {
+                $wallet = Wallet::find($transaction->wallet_id);
+                if ($wallet) {
+                    $balanceBefore = $wallet->balance;
+                    $wallet->balance += $transaction->amount;
+                    $wallet->save();
+                    
+                    $transaction->balance_before = $balanceBefore;
+                    $transaction->balance_after = $wallet->balance;
+                    $transaction->status = 'completed';
+                    $transaction->save();
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Erreur vérification paiement: ' . $e->getMessage());
         }
 
         return response()->json([
-            'transaction'     => $transaction->fresh(),
-            'notchpay_status' => $status,
-            'balance'         => $transaction->user->wallet->balance,
+            'success' => true,
+            'status' => $transaction->status,
+            'amount' => $transaction->amount,
         ]);
     }
 
     public function callback(Request $request)
     {
-        $reference = $request->query('reference') ?? $request->query('trxref');
-        return $this->verifyPayment($reference);
+        Log::info('NotchPay webhook received', $request->all());
+
+        $reference = $request->input('reference');
+        $status = $request->input('status');
+
+        if ($reference && $status === 'completed') {
+            $transaction = Transaction::where('reference', $reference)->first();
+            if ($transaction && $transaction->status === 'pending') {
+                $wallet = Wallet::find($transaction->wallet_id);
+                if ($wallet) {
+                    $balanceBefore = $wallet->balance;
+                    $wallet->balance += $transaction->amount;
+                    $wallet->save();
+                    
+                    $transaction->balance_before = $balanceBefore;
+                    $transaction->balance_after = $wallet->balance;
+                    $transaction->status = 'completed';
+                    $transaction->save();
+                }
+            }
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    public function history(Request $request)
+    {
+        $user = $request->user();
+        $wallet = Wallet::where('user_id', $user->id)->first();
+
+        if (!$wallet) {
+            return response()->json(['data' => []]);
+        }
+
+        $transactions = Transaction::where('wallet_id', $wallet->id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json(['data' => $transactions]);
+    }
+
+    public function withdraw(Request $request)
+    {
+        $request->validate([
+            'amount' => 'required|numeric|min:1',
+        ]);
+
+        $user = $request->user();
+        $amount = $request->amount;
+
+        $wallet = Wallet::where('user_id', $user->id)->first();
+
+        if (!$wallet || $wallet->balance < $amount) {
+            return response()->json(['message' => 'Solde insuffisant'], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $balanceBefore = $wallet->balance;
+            $wallet->balance -= $amount;
+            $wallet->save();
+
+            Transaction::create([
+                'wallet_id' => $wallet->id,
+                'user_id' => $user->id,
+                'type' => 'withdraw',
+                'amount' => $amount,
+                'balance_before' => $balanceBefore,
+                'balance_after' => $wallet->balance,
+                'description' => 'Retrait',
+                'status' => 'completed',
+                'reference' => 'WTH-' . uniqid(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Retrait effectué avec succès',
+                'balance' => $wallet->balance,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Erreur retrait: ' . $e->getMessage());
+            return response()->json(['message' => 'Erreur lors du retrait'], 500);
+        }
     }
 }

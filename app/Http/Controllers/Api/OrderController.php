@@ -13,6 +13,7 @@ use App\Models\OrderItem;
 use App\Models\WalletTransaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -311,46 +312,101 @@ class OrderController extends Controller
 
     // ==================== PAIEMENT AVEC NOTCHPAY ====================
     public function payWithNotchPay(Order $order, Request $request)
+
     {
+
         $user = $request->user();
+
         if ($order->user_id !== $user->id) {
-            return response()->json(['success' => false, 'message' => 'Non autorisé'], 403);
+
+            return response()->json(["success" => false, "message" => "Non autorisé"], 403);
+
         }
-        if ($order->status !== 'pending') {
-            return response()->json(['success' => false, 'message' => 'Commande déjà traitée'], 422);
+
+        if ($order->status !== "pending") {
+
+            return response()->json(["success" => false, "message" => "Commande déjà traitée"], 422);
+
         }
+
+
 
         try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Authorization' => config('services.notchpay.public_key'),
-                'Content-Type'  => 'application/json',
-                'Accept'        => 'application/json',
-            ])->post('https://api.notchpay.co/payments/initialize', [
-                'amount'      => (int) $order->total_amount,
-                'currency'    => 'XAF',
-                'email'       => $user->email,
-                'reference'   => $order->order_number,
-                // ⚠️ Remplacez cette URL par votre domaine ngrok actuel (ou utilisez une variable d'environnement)
-                'callback'    => 'https://device-sputter-august.ngrok-free.dev/api/orders/notchpay/webhook',
-                'description' => 'Paiement commande ' . $order->order_number,
+
+            $response = Http::withHeaders([
+
+                "Authorization" => config("notchpay.public_key"),
+
+                "Content-Type"  => "application/json",
+
+                "Accept"        => "application/json",
+
+            ])->post("https://api.notchpay.co/payments", [
+
+                "amount"      => (int) $order->total_amount,
+
+                "currency"    => "XAF",
+
+                "customer"    => [
+
+                    "email" => $user->email,
+
+                    "name"  => $user->name ?? $user->firstname ?? "Client",
+
+                ],
+
+                "reference"   => $order->order_number,
+
+                "callback"    => config("app.url") . "/api/orders/notchpay/webhook",
+
+                "description" => "Paiement commande " . $order->order_number,
+
             ]);
+
+
 
             $data = $response->json();
-            Log::info('NotchPay response', ['data' => $data]);
 
-            if (!isset($data['authorization_url'])) {
-                return response()->json(['success' => false, 'message' => 'Erreur NotchPay', 'debug' => $data], 500);
+            Log::info("NotchPay response", ["data" => $data]);
+
+
+
+            $authUrl = $data["authorization_url"] ?? $data["redirect_url"] ?? null;
+
+            if (!$authUrl) {
+
+                return response()->json(["success" => false, "message" => "Erreur NotchPay", "debug" => $data], 500);
+
             }
 
+
+
+            $order->payment_reference = $data["reference"] ?? $data["id"] ?? null;
+
+            $order->save();
+
+
+
             return response()->json([
-                'success'           => true,
-                'authorization_url' => $data['authorization_url'],
-                'reference'         => $data['transaction']['reference'] ?? null,
-                'order_number'      => $order->order_number,
+
+                "success" => true,
+
+                "authorization_url" => $authUrl,
+
+                "reference" => $data["reference"] ?? $data["id"] ?? null,
+
+                "order_number" => $order->order_number,
+
             ]);
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+
+        } catch (Exception $e) {
+
+            Log::error("Erreur NotchPay: " . $e->getMessage());
+
+            return response()->json(["success" => false, "message" => "Erreur NotchPay", "debug" => $e->getMessage()], 500);
+
         }
+
     }
 
     // ==================== VÉRIFICATION MANUELLE ====================
@@ -432,6 +488,21 @@ class OrderController extends Controller
         }
     }
 
+
+    public function show(Request $request, Order $order)
+    {
+        try {
+            if ($order->user_id !== $request->user()->id) {
+                return response()->json(["success" => false, "message" => "Accès refusé"], 403);
+            }
+            $order->load(["items.product", "shop"]);
+            return response()->json(["success" => true, "data" => $order]);
+        } catch (\Exception $e) {
+            Log::error("Erreur show order : " . $e->getMessage());
+            return response()->json(["success" => false, "message" => "Erreur interne"], 500);
+        }
+    }
+
     // ==================== COMMANDES VENDEUR ====================
     public function sellerOrders(Request $request)
     {
@@ -456,7 +527,7 @@ class OrderController extends Controller
 {
     $user = auth()->user();
     // Vérifier que l'utilisateur est administrateur (vous pouvez adapter le rôle)
-    if (!$user || $user->role !== 'admin') {
+    if (!$user || !$user->isAdmin()) {
         return response()->json(['message' => 'Non autorisé'], 403);
     }
 
