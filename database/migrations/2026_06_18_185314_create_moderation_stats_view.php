@@ -19,32 +19,6 @@ return new class extends Migration
                 AVG(violence_score) as avg_violence
             FROM moderation_posts
             GROUP BY status
-            
-            UNION ALL
-            
-            SELECT 
-                'comment' as content_type,
-                status,
-                COUNT(*) as total,
-                AVG(toxicity_score) as avg_toxicity,
-                AVG(spam_score) as avg_spam,
-                AVG(hate_score) as avg_hate,
-                AVG(violence_score) as avg_violence
-            FROM moderation_comments
-            GROUP BY status
-            
-            UNION ALL
-            
-            SELECT 
-                'message' as content_type,
-                status,
-                COUNT(*) as total,
-                AVG(toxicity_score) as avg_toxicity,
-                AVG(spam_score) as avg_spam,
-                AVG(hate_score) as avg_hate,
-                AVG(violence_score) as avg_violence
-            FROM moderation_messages
-            GROUP BY status
         ");
     }
 

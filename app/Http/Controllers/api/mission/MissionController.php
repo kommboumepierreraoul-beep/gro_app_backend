@@ -334,7 +334,7 @@ class MissionController extends Controller
             LEFT JOIN mission_categories mc ON m.category_id = mc.id
             WHERE m.status = 'published'
               AND m.deleted_at IS NULL
-              AND (m.expires_at IS NULL OR m.expires_at > NOW())
+              AND (m.expires_at IS NULL)
               AND m.location_point IS NOT NULL
               AND ST_DWithin(
                     m.location_point::geography,

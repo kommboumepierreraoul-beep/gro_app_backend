@@ -80,6 +80,7 @@ class PostController extends Controller
             return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
         }
 
+        // Vérifier si l'utilisateur peut publier
         if (!$user->canPublish()) {
             return response()->json([
                 'success' => false,
@@ -87,6 +88,7 @@ class PostController extends Controller
             ], 403);
         }
 
+        // Validation
         $validator = Validator::make($request->all(), [
             'content'        => 'nullable|string|max:20000',
             'type'           => 'nullable|string|in:text,image,video,pdf,shared,announcement',
@@ -100,6 +102,7 @@ class PostController extends Controller
             ], 422);
         }
 
+        // Vérifier qu'il y a du contenu
         $hasContent = !empty(trim($request->content ?? ''));
         $hasFiles   = count($request->allFiles()) > 0;
 
@@ -110,7 +113,6 @@ class PostController extends Controller
             ], 422);
         }
 
-        // ✅ Séparer la création du post de la modération
         $post = null;
         $moderationStatus = 'pending';
         $moderationMessage = 'Publication créée avec succès.';
@@ -208,7 +210,7 @@ class PostController extends Controller
                 ]);
 
                 // ── Création de la modération (pending) ─────────────────────────
-                $moderation = ModerationPost::create([
+                ModerationPost::create([
                     'post_id' => $post->id,
                     'status' => 'pending',
                     'content_hash' => $post->generateContentHash(),
@@ -218,21 +220,19 @@ class PostController extends Controller
             });
 
             // ✅ 2. Modération (HORS transaction)
-            // Le post existe maintenant, on peut le modérer sans bloquer la transaction
             try {
                 // Fast Moderation Layer
                 $fastDecision = $this->fastLayer->check($post->content, $user->id);
 
                 if ($fastDecision !== null) {
-                    // Décision rapide
                     $moderationStatus = $fastDecision;
                     $moderationMessage = $this->getModerationMessage($fastDecision);
 
                     $post->moderation->update([
                         'status' => $fastDecision,
                         'moderated_at' => now(),
-                        'reason' => $fastDecision === 'rejected' 
-                            ? 'Contenu rejeté par les filtres automatiques' 
+                        'reason' => $fastDecision === 'rejected'
+                            ? 'Contenu rejeté par les filtres automatiques'
                             : 'Contenu approuvé par les filtres automatiques',
                     ]);
 
@@ -244,9 +244,7 @@ class PostController extends Controller
                             'reason' => 'Fast moderation layer decision',
                             'rule' => $fastDecision === 'rejected' ? 'blocklist/rate_limit' : 'duplicate',
                         ],
-                        'created_at' => now(),
                     ]);
-
                 } else {
                     // Analyse IA synchrone
                     $moderationResult = $this->syncModeration->moderatePostSync($post);
@@ -264,7 +262,6 @@ class PostController extends Controller
                         'result_raw' => $moderationResult,
                     ]);
                 }
-
             } catch (\Exception $e) {
                 Log::error('Erreur modération', [
                     'post_id' => $post->id,
@@ -308,7 +305,6 @@ class PostController extends Controller
                 'data' => $responseData,
                 'moderation_status' => $moderationStatus,
             ], 201);
-
         } catch (\Exception $e) {
             Log::error('Erreur store post: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
 
@@ -330,6 +326,7 @@ class PostController extends Controller
         $post = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
             ->findOrFail($id);
 
+        // Vérifier la visibilité
         if (!$post->isVisible() && $post->user_id !== $user?->id) {
             return response()->json([
                 'success' => false,
@@ -367,8 +364,10 @@ class PostController extends Controller
         DB::beginTransaction();
 
         try {
+            // Mettre à jour le contenu
             $post->update(['content' => $request->content]);
 
+            // Réinitialiser la modération
             if ($post->moderation) {
                 $post->moderation->update([
                     'status' => 'pending',
@@ -415,7 +414,6 @@ class PostController extends Controller
                 'message' => 'Publication mise à jour.',
                 'data'    => $this->formatPost($post->fresh(['author.profile', 'moderation']), $user->id),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -438,6 +436,7 @@ class PostController extends Controller
             return response()->json(['success' => false, 'message' => 'Action non autorisée.'], 403);
         }
 
+        // Supprimer les fichiers
         foreach (array_merge($post->media_urls ?? [], array_column($post->pdf_files ?? [], 'url')) as $url) {
             try {
                 $path = str_replace('/storage/', '', parse_url($url, PHP_URL_PATH));
@@ -449,6 +448,7 @@ class PostController extends Controller
             }
         }
 
+        // Supprimer la modération
         if ($post->moderation) {
             $post->moderation->delete();
         }
@@ -535,32 +535,7 @@ class PostController extends Controller
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // 8. POSTS EN ATTENTE DE MODÉRATION
-    // ────────────────────────────────────────────────────────────────────────────
-
-    public function pendingPosts(Request $request): JsonResponse
-    {
-        $user = $request->user();
-
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
-        }
-
-        $posts = Post::with(['author.profile', 'moderation'])
-            ->where('user_id', $user->id)
-            ->whereHas('moderation', function ($query) {
-                $query->whereIn('status', ['pending', 'review']);
-            })
-            ->latest()
-            ->paginate(12);
-
-        $posts->getCollection()->transform(fn($post) => $this->formatPost($post, $user->id));
-
-        return response()->json(['success' => true, 'data' => $posts]);
-    }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // 9. RÉANALYSER UN POST
+    // 8. RÉANALYSER UN POST (Admin ou propriétaire)
     // ────────────────────────────────────────────────────────────────────────────
 
     public function reanalyze(Request $request, int $id): JsonResponse
@@ -601,7 +576,6 @@ class PostController extends Controller
                     ],
                 ],
             ]);
-
         } catch (\Exception $e) {
             Log::error('Erreur réanalyse: ' . $e->getMessage());
             return response()->json([
@@ -612,7 +586,7 @@ class PostController extends Controller
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // 10. HELPERS
+    // 9. HELPERS
     // ────────────────────────────────────────────────────────────────────────────
 
     private function formatBytes(int $bytes): string
@@ -643,6 +617,7 @@ class PostController extends Controller
             'moderation_status' => $post->moderation_status,
         ];
 
+        // Les détails de modération sont visibles uniquement par l'auteur
         if ($authUserId && ($post->user_id === $authUserId)) {
             $data['moderation'] = [
                 'status' => $post->moderation_status,

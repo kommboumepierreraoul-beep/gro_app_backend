@@ -66,7 +66,6 @@ class ModerationAuditLog extends Model
         return match ($this->moderatable_type) {
             ModerationPost::class => '📝 Publication',
             ModerationComment::class => '💬 Commentaire',
-            ModerationMessage::class => '✉️ Message',
             default => '❓ Inconnu',
         };
     }
@@ -136,10 +135,6 @@ class ModerationAuditLog extends Model
         return $this->scopeForContent($query, ModerationComment::class, $commentId);
     }
 
-    public function scopeForMessage($query, int $messageId)
-    {
-        return $this->scopeForContent($query, ModerationMessage::class, $messageId);
-    }
 
     public function scopeApprovals($query)
     {

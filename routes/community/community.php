@@ -98,4 +98,5 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
         Route::delete('/{id}',         [AnnouncementController::class, 'destroy']);
         Route::post('/{id}/like',      [AnnouncementController::class, 'toggleLike']);
     });
+
 });
