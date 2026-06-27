@@ -9,11 +9,13 @@
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\api\AuthController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 
 Route::get('/test-gmail', function () {
 
-    $destinataire = 'raoulkm2006@gmail'; // ← Changez par votre adresse de réception
+    $destinataire = 'raoulkm2006@gmail.com'; // ← Changez par votre adresse de réception
 
     try {
         Mail::raw(
@@ -67,6 +69,11 @@ Route::get('/test-brevo', function () {
 });
 
 Route::get('/auth/google/callback', [AuthController::class, 'callback']);
+
 Route::get('/test-ssl', function () {
     return file_get_contents('https://www.google.com');
+});
+
+Route::get('/test-upload', function () {
+    return view('test-upload');
 });

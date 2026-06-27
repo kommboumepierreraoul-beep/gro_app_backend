@@ -41,5 +41,17 @@ return [
     'monetbil' => [
         'service_key' => env('MONETBIL_SERVICE_KEY'),
         'service_secret' => env('MONETBIL_SERVICE_SECRET'),
+    'ai' => [
+        'api_key'       => env('AI_API_KEY'),
+        'base_url'      => env('AI_BASE_URL'),
+        'default_model' => env('AI_DEFAULT_MODEL'),
+        'max_tokens'    => env('AI_MAX_TOKENS', 2048),
+        'temperature'   => env('AI_TEMPERATURE', 0.7),
+    ],
+
+
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+        'model' => env('GROQ_MODEL', 'llama-3.3-70b-versatile'),
     ],
 ];

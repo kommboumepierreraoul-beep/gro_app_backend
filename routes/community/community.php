@@ -25,7 +25,9 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
         Route::post('/',               [PostController::class, 'store']);
 
         // ✅ Routes spécifiques EN PREMIER
-        Route::get('/user/{userId}',   [PostController::class, 'userPosts']);
+        Route::get('/user/{userId}',           [PostController::class, 'userPosts']);
+        Route::get('/user/{userId}/shared',    [PostController::class, 'userSharedPosts']);
+        Route::get('/user/{userId}/liked',     [PostController::class, 'userLikedPosts']);
 
         // ✅ Wildcards EN DERNIER
         Route::get('/{id}',            [PostController::class, 'show']);
@@ -58,14 +60,20 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
 
     // ── Messages ──────────────────────────────────────────────────────────────
     Route::prefix('messages')->group(function () {
-        // ✅ Routes statiques EN PREMIER
-        Route::get('/conversations',                       [MessageController::class, 'conversations']);
-        Route::post('/conversations',                      [MessageController::class, 'createOrFind']);
+        Route::get('/conversations', [MessageController::class, 'conversations']);
+        Route::post('/conversations', [MessageController::class, 'createOrFind']);
 
-        // ✅ Wildcards EN DERNIER
-        Route::get('/conversations/{id}/messages',         [MessageController::class, 'messages']);
-        Route::post('/conversations/{id}/messages',        [MessageController::class, 'send']);
-        Route::delete('/messages/{id}',                    [MessageController::class, 'deleteMessage']);
+        // 🔥 Route pour marquer comme lu
+        Route::post('/conversations/{id}/read', [MessageController::class, 'markAsRead']);
+
+        // Routes pour les groupes
+        Route::post('/conversations/{id}/participants', [MessageController::class, 'addParticipants']);
+        Route::delete('/conversations/{id}/leave', [MessageController::class, 'leaveGroup']);
+
+        Route::get('/conversations/{id}/messages', [MessageController::class, 'messages']);
+        Route::post('/conversations/{id}/messages', [MessageController::class, 'send']);
+        // Route::get('/messages/messages/{id}/status', [MessageController::class, 'getMessageStatus']);
+        Route::delete('/messages/{id}', [MessageController::class, 'deleteMessage']);
     });
 
     // ── Notifications ─────────────────────────────────────────────────────────
@@ -83,6 +91,7 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
     Route::prefix('announcements')->group(function () {
         Route::get('/',                [AnnouncementController::class, 'index']);
         Route::post('/',               [AnnouncementController::class, 'store']);
+        Route::post('/{id}',            [AnnouncementController::class, 'update']);
 
         // ✅ Wildcards EN DERNIER
         Route::get('/{id}',            [AnnouncementController::class, 'show']);

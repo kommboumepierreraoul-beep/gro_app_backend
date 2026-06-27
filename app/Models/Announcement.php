@@ -25,6 +25,7 @@ class Announcement extends Model
 
     protected $fillable = [
         'user_id',
+        'type',
         'title',
         'content',
         'category',
@@ -32,6 +33,18 @@ class Announcement extends Model
         'expires_at',
         'likes_count',
     ];
+
+    protected $table = 'posts'; // ← pointe vers posts
+
+    protected static function booted(): void
+    {
+        // Filtre automatique sur type = announcement
+        static::addGlobalScope(
+            'announcement',
+            fn($q) =>
+            $q->where('type', 'announcement')
+        );
+    }
 
     protected $casts = ['expires_at' => 'datetime'];
 
@@ -52,9 +65,8 @@ class Announcement extends Model
 
     public function scopeActive($query)
     {
-        return $query->where(
-            fn($q) =>
-            $q->whereNull('expires_at')->orWhere('expires_at', '>', now())
-        );
+        return $query->where(function ($q) {
+            $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+        });
     }
 }
