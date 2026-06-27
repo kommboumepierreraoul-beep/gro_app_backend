@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\ActivityLog;
 use App\Notifications\EmailVerificationNotification;
 use App\Notifications\ResetPasswordNotification;
 use Illuminate\Auth\Events\Registered;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -46,47 +48,63 @@ class AuthController extends Controller
     /**
      * Shared registration logic.
      */
-    private function register(Request $request, string $role): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'firstname' => 'required|string|max:255',
-            'lastname'  => 'required|string|max:255',
-            'email'     => 'required|email|unique:users,email',
-            'password'  => ['required', 'confirmed', PasswordRule::defaults()],
-            'phone'     => 'nullable|string|max:20',
+  private function register(Request $request, string $role): JsonResponse
+{
+    $validator = Validator::make($request->all(), [
+        'firstname' => 'required|string|max:255',
+        'lastname'  => 'required|string|max:255',
+        'email'     => 'required|email|unique:users,email',
+        'password'  => ['required', 'confirmed', PasswordRule::defaults()],
+        'phone'     => 'nullable|string|max:20',
+        'gender'    => 'nullable|string|in:male,female',
+    ]);
+
+    if ($validator->fails()) {
+        return $this->validationError($validator->errors());
+    }
+
+    try {
+        $user = User::create([
+            'firstname'         => $request->firstname,
+            'lastname'          => $request->lastname,
+            'email'             => $request->email,
+            'password'          => Hash::make($request->password),
+            'phone'             => $request->phone,
+            'role'              => $role,
+            'gender'            => $request->gender, // ✅ espace supprimé
+            'email_verified_at' => null,
         ]);
 
-        if ($validator->fails()) {
-            return $this->validationError($validator->errors());
-        }
+        // ✅ Créer le wallet automatiquement
+        $user->wallet()->create([
+            'balance'       => 0,
+            'total_credited'=> 0,
+            'total_debited' => 0,
+            'currency'      => 'XAF',
+        ]);
 
-        try {
-            $user = User::create([
-                'firstname'         => $request->firstname,
-                'lastname'          => $request->lastname,
-                'email'             => $request->email,
-                'password'          => Hash::make($request->password),
-                'phone'             => $request->phone,
-                'role'              => $role,
-                'email_verified_at' => null, // Not verified yet
-            ]);
+        $this->sendVerificationEmail($user);
 
-            // Fire the Registered event → triggers SendEmailVerificationNotification
-            // (or use our custom notification below)
-            $this->sendVerificationEmail($user);
+        ActivityLog::log(
+            'user_joined',
+            "{$user->firstname} {$user->lastname} a rejoint la plateforme",
+            'User',
+            $user->id
+        );
 
-            $token = $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createToken('auth_token')->plainTextToken;
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Registration successful. Please check your email to verify your account.',
-                'user'    => $user,
-                'token'   => $token,
-            ], 201);
-        } catch (\Exception $e) {
-            return $this->serverError('Registration failed', $e);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Registration successful. Please check your email to verify your account.',
+            'user'    => $user,
+            'token'   => $token,
+        ], 201);
+
+    } catch (\Exception $e) {
+        return $this->serverError('Registration failed', $e);
     }
+}
 
     // -------------------------------------------------------------------------
     // EMAIL VERIFICATION
@@ -118,35 +136,35 @@ class AuthController extends Controller
      * Verify email with the OTP code sent by email.
      */
     public function verifyEmail(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'code' => 'required|digits:6',
-        ]);
+{
+    $validator = Validator::make($request->all(), [
+        'code' => 'required|digits:6',
+    ]);
 
-        if ($validator->fails()) {
-            return $this->validationError($validator->errors());
-        }
-
-        $user      = $request->user();
-        $cacheKey  = $this->otpCacheKey($user->id);
-        $cached    = Cache::get($cacheKey);
-
-        if (!$cached || $cached['code'] !== $request->code) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid or expired verification code.',
-            ], 422);
-        }
-
-        $user->markEmailAsVerified();
-        Cache::forget($cacheKey);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Email verified successfully.',
-            'user'    => $user,
-        ]);
+    if ($validator->fails()) {
+        return $this->validationError($validator->errors());
     }
+
+    $user     = $request->user();
+    $cacheKey = $this->otpCacheKey($user->id);
+    $cached   = Cache::get($cacheKey);
+
+    if (!$cached || $cached['code'] !== $request->code) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Invalid or expired verification code.',
+        ], 422);
+    }
+
+    $user->markEmailAsVerified();
+    Cache::forget($cacheKey);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Email verified successfully.',
+        //'user'    => $user->fresh(), // ← recharge sans l'attribut wallet_balance
+    ]);
+}
 
     //
 
@@ -207,9 +225,10 @@ class AuthController extends Controller
      */
     public function profile(Request $request): JsonResponse
     {
+        $user = $request->user()->load('profile');
         return response()->json([
             'success' => true,
-            'user'    => $request->user(),
+            'user'    => $user,
         ]);
     }
 
@@ -224,7 +243,7 @@ class AuthController extends Controller
             'firstname' => 'sometimes|string|max:255',
             'lastname'  => 'sometimes|string|max:255',
             'phone'     => 'sometimes|nullable|string|max:20',
-            'avatar'    => 'sometimes|nullable|url',
+            'avatar'    => 'sometimes|nullable|image|mimes:jpg,jpeg,png,webp|max:4096',
         ]);
 
         if ($validator->fails()) {
@@ -232,7 +251,18 @@ class AuthController extends Controller
         }
 
         try {
-            $user->update($request->only('firstname', 'lastname', 'phone', 'avatar'));
+            $user->update($request->only('firstname', 'lastname', 'phone'));
+
+            if ($request->hasFile('avatar')) {
+                $profile = $user->profile ?? $user->profile()->create([]);
+                if ($profile->avatar) {
+                    Storage::disk('public')->delete($profile->avatar);
+                }
+                $path = $request->file('avatar')->store('avatars', 'public');
+                $profile->update(['avatar' => $path]);
+            }
+
+            $user->load('profile');
 
             return response()->json([
                 'success' => true,

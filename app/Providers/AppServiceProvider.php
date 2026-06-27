@@ -1,6 +1,5 @@
 <?php
 
-namespace App\Providers;
 
 use App\Services\Moderation\Contracts\AIModerationInterface;
 use App\Services\Moderation\Providers\GroqModerationProvider;
@@ -13,9 +12,18 @@ use App\Services\Moderation\FastModerationLayer;
 use App\Services\Moderation\ModerationService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ServiceProvider;
+use App\Models\Order;
+use App\Policies\OrderPolicy;
 
 class AppServiceProvider extends ServiceProvider
 {
+    /**
+     * Les politiques d'autorisation de l'application.
+     */
+    protected $policies = [
+        Order::class => OrderPolicy::class,
+    ];
+
     /**
      * Register any application services.
      */
