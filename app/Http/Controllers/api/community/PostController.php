@@ -41,6 +41,62 @@ class PostController extends Controller
         $this->syncModeration = $syncModeration;
     }
 
+    /**
+     * 10. RECHERCHER DES POSTS
+     * GET /api/community/posts/search?q=keyword
+     */
+    public function search(Request $request): JsonResponse
+    {
+        try {
+            $query = $request->input('q');
+
+            // Vérifier que la requête est valide
+            if (!$query || strlen(trim($query)) < 2) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [],
+                    'message' => 'Requête trop courte (minimum 2 caractères)'
+                ]);
+            }
+
+            $user = $request->user();
+            $searchTerm = trim($query);
+
+            // ✅ Rechercher dans les posts
+            $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+                ->where(function ($q) use ($searchTerm) {
+                    $q->where('content', 'LIKE', "%{$searchTerm}%")
+                        ->orWhere('title', 'LIKE', "%{$searchTerm}%");
+                })
+                ->whereHas('moderation', function ($q) {
+                    $q->where('status', 'approved');
+                })
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
+
+            // Formater les posts
+            $posts->getCollection()->transform(
+                fn($post) =>
+                $this->formatPost($post, $user?->id)
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => $posts,
+                'query' => $searchTerm,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erreur recherche posts: ' . $e->getMessage(), [
+                'query' => $request->input('q'),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la recherche',
+            ], 500);
+        }
+    }
     // ────────────────────────────────────────────────────────────────────────────
     // 1. FEED PAGINÉ
     // ────────────────────────────────────────────────────────────────────────────
@@ -319,12 +375,15 @@ class PostController extends Controller
     // 3. VOIR UN POST
     // ────────────────────────────────────────────────────────────────────────────
 
-    public function show(Request $request, int $id): JsonResponse
+    public function show(Request $request, $id): JsonResponse  // ✅ Accepter string ou int
     {
         $user = $request->user();
 
+        // ✅ Convertir en int si nécessaire
+        $postId = is_numeric($id) ? (int) $id : $id;
+
         $post = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
-            ->findOrFail($id);
+            ->findOrFail($postId);
 
         // Vérifier la visibilité
         if (!$post->isVisible() && $post->user_id !== $user?->id) {
@@ -339,7 +398,6 @@ class PostController extends Controller
             'data'    => $this->formatPost($post, $user?->id),
         ]);
     }
-
     // ────────────────────────────────────────────────────────────────────────────
     // 4. MODIFIER UN POST
     // ────────────────────────────────────────────────────────────────────────────
@@ -513,8 +571,10 @@ class PostController extends Controller
         ]);
     }
 
+  
+
     // ────────────────────────────────────────────────────────────────────────────
-    // 7. POSTS D'UN UTILISATEUR
+    // 7. POSTS D'UN UTILISATEUR (CORRIGÉ)
     // ────────────────────────────────────────────────────────────────────────────
 
     public function userPosts(Request $request, int $userId): JsonResponse

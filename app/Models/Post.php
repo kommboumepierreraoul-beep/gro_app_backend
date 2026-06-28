@@ -287,11 +287,13 @@ class Post extends Model
     public function scopeFeed($query, int $userId)
     {
         $followingIds = Follow::where('follower_id', $userId)->pluck('following_id');
-        $ids = $followingIds->push($userId);
 
-        return $query->whereIn('user_id', $ids)
+        return $query
             ->visible()
-            ->latest();
+            ->latest()
+            ->orderByRaw("CASE WHEN user_id = ? OR user_id IN (" .
+                implode(',', $followingIds->push($userId)->toArray()) .
+                ") THEN 0 ELSE 1 END", [$userId]);
     }
 
     public function scopeActive($query)

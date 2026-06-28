@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 
 class ConversationController extends Controller
 {
-    public function __construct(private ConversationService $conversationService) {}
 
     /**
      * GET /api/ai/conversations

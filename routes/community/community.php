@@ -23,6 +23,8 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
     Route::prefix('posts')->group(function () {
         Route::get('/',                [PostController::class, 'index']);
         Route::post('/',               [PostController::class, 'store']);
+        Route::get('/search',          [PostController::class, 'search']);
+
 
         // ✅ Routes spécifiques EN PREMIER
         Route::get('/user/{userId}',           [PostController::class, 'userPosts']);
@@ -77,14 +79,25 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
     });
 
     // ── Notifications ─────────────────────────────────────────────────────────
-    Route::prefix('notifications')->group(function () {
-        // ✅ Route statique EN PREMIER
-        Route::get('/',                [NotificationController::class, 'index']);
-        Route::put('/read-all',        [NotificationController::class, 'markAllRead']);
+    Route::middleware(['auth:sanctum'])->group(function () {
+        Route::prefix('notifications')->group(function () {
+            // Routes communautaires
+            Route::get('/', [NotificationController::class, 'index']);
+            Route::get('/unread', [NotificationController::class, 'unread']);
+            Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+            Route::post('/{id}/read', [NotificationController::class, 'markRead']);
+            Route::post('/read-all', [NotificationController::class, 'markAllRead']);
+            Route::delete('/{id}', [NotificationController::class, 'destroy']);
+            Route::delete('/', [NotificationController::class, 'clearAll']);
+            Route::get('/types', [NotificationController::class, 'types']);
 
-        // ✅ Wildcards EN DERNIER
-        Route::put('/{id}/read',       [NotificationController::class, 'markRead']);
-        Route::delete('/{id}',         [NotificationController::class, 'destroy']);
+            // Routes missions
+            Route::prefix('missions')->group(function () {
+                Route::get('/', [NotificationController::class, 'missionIndex']);
+                Route::get('/unread', [NotificationController::class, 'missionUnread']);
+                Route::get('/unread-count', [NotificationController::class, 'missionUnreadCount']);
+            });
+        });
     });
 
     // ── Annonces ──────────────────────────────────────────────────────────────
