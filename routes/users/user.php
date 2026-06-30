@@ -10,5 +10,7 @@ Route::middleware(['auth:sanctum', 'verified.email'])->prefix('users')->group(fu
     Route::put('/{id}', [UserController::class, 'update']); // Update user by ID
     Route::delete('/{id}', [UserController::class, 'destroy']); // Delete user by ID
     Route::post('/restore/{id}', [UserController::class, 'restore']); // Restore deleted user by ID
+    
+    
 
 });

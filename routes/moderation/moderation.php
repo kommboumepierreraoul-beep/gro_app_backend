@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\API\Moderation\ModerationController;
+use App\Http\Controllers\api\Moderation\ModerationController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum'])->prefix('moderation')->group(function () {

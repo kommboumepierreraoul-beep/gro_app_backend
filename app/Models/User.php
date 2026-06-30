@@ -4,22 +4,89 @@ namespace App\Models;
 
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\{
-    HasMany,
-    HasOne,
-    BelongsToMany
-};
+use Illuminate\Database\Eloquent\Relations\{HasMany, HasOne, BelongsToMany};
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
+use App\Models\Transaction;
+
+/**
+ * @property int $id
+ * @property string $firstname
+ * @property string $lastname
+ * @property string $role
+ * @property string|null $phone
+ * @property string|null $gender
+ * @property string $email
+ * @property \Illuminate\Support\Carbon|null $email_verified_at
+ * @property string $password
+ * @property string|null $deleted_at
+ * @property string|null $remember_token
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property string $status
+ * @property \Illuminate\Support\Carbon|null $publishing_blocked_until
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Announcement> $announcements
+ * @property-read int|null $announcements_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Comment> $comments
+ * @property-read int|null $comments_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\CommunityNotification> $communityNotifications
+ * @property-read int|null $community_notifications_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Conversation> $conversations
+ * @property-read int|null $conversations_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, User> $followers
+ * @property-read int|null $followers_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, User> $following
+ * @property-read int|null $following_count
+ * @property-read string $full_name
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Like> $likes
+ * @property-read int|null $likes_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Message> $messages
+ * @property-read int|null $messages_count
+ * @property-read \Illuminate\Notifications\DatabaseNotificationCollection<int, \Illuminate\Notifications\DatabaseNotification> $notifications
+ * @property-read int|null $notifications_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Order> $orders
+ * @property-read int|null $orders_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Post> $posts
+ * @property-read int|null $posts_count
+ * @property-read \App\Models\UserProfile|null $profile
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\ProductReview> $reviews
+ * @property-read int|null $reviews_count
+ * @property-read \App\Models\Shop|null $shop
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \Laravel\Sanctum\PersonalAccessToken> $tokens
+ * @property-read int|null $tokens_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Transaction> $transactions
+ * @property-read int|null $transactions_count
+ * @property-read \App\Models\Wallet|null $wallet
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Wishlist> $wishlist
+ * @property-read int|null $wishlist_count
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User admins()
+ * @method static \Database\Factories\UserFactory factory($count = null, $state = [])
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User fournisseurs()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User users()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereDeletedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereEmail($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereEmailVerifiedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereFirstname($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereGender($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereLastname($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User wherePassword($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User wherePhone($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereRememberToken($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereRole($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|User whereUpdatedAt($value)
+ * @mixin \Eloquent
+ */
 class User extends Authenticatable implements MustVerifyEmail
 {
     use HasApiTokens, HasFactory, Notifiable;
-
-    // -------------------------------------------------------------------------
-    // CONSTANTES
-    // -------------------------------------------------------------------------
 
     public const ROLE_ADMIN = 'admin';
     public const ROLE_USER = 'user';
@@ -36,6 +103,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'password',
         'phone',
         'role',
+        'status',
         'email_verified_at',
         'publishing_blocked_until',
     ];
@@ -55,6 +123,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     protected $appends = [
         'full_name',
+        'wallet_balance', // Ajout de l'accesseur wallet_balance
     ];
 
     // -------------------------------------------------------------------------
@@ -65,6 +134,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'publishing_blocked_until' => 'datetime',
+        'is_admin' => 'boolean', // Ajout du cast pour is_admin
     ];
 
     // -------------------------------------------------------------------------
@@ -76,9 +146,9 @@ class User extends Authenticatable implements MustVerifyEmail
         return "{$this->firstname} {$this->lastname}";
     }
 
-    public function getAvatarAttribute()
+    public function getWalletBalanceAttribute()
     {
-        return $this->profile?->avatar;
+        return $this->wallet ? $this->wallet->balance : 0;
     }
 
     // -------------------------------------------------------------------------
@@ -87,7 +157,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function profile(): HasOne
     {
-        return $this->hasOne(UserProfile::class, 'user_id');
+        return $this->hasOne(UserProfile::class);
     }
 
     public function posts(): HasMany
@@ -108,6 +178,41 @@ class User extends Authenticatable implements MustVerifyEmail
     public function announcements(): HasMany
     {
         return $this->hasMany(Announcement::class);
+    }
+
+    public function shop(): HasOne
+    {
+        return $this->hasOne(Shop::class);
+    }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
+
+    public function wishlist(): HasMany
+    {
+        return $this->hasMany(Wishlist::class);
+    }
+
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(ProductReview::class);
+    }
+
+    public function wallet(): HasOne
+    {
+        return $this->hasOne(Wallet::class);
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(Transaction::class);
+    }
+
+    public function walletTransactions(): HasMany
+    {
+        return $this->hasMany(WalletTransaction::class);
     }
 
     // -------------------------------------------------------------------------
@@ -184,7 +289,7 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     // -------------------------------------------------------------------------
-    // MODERATION - RELATIONS (UNIQUEMENT POUR LES POSTS)
+    // MODERATION - RELATIONS
     // -------------------------------------------------------------------------
 
     /**
@@ -248,7 +353,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function isAdmin(): bool
     {
-        return $this->role === self::ROLE_ADMIN;
+        return $this->role === self::ROLE_ADMIN || $this->is_admin === true;
     }
 
     public function isUser(): bool
@@ -284,7 +389,7 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     // -------------------------------------------------------------------------
-    // MODERATION - STATISTIQUES DE BASE
+    // MODERATION - STATISTIQUES
     // -------------------------------------------------------------------------
 
     /**

@@ -3,10 +3,10 @@
 // routes/api.php — Ajouter ces routes dans votre fichier api.php existant
 // ⚠️ Toutes les routes missions nécessitent auth:sanctum
 
-use App\Http\Controllers\Api\Mission\MissionController;
-use App\Http\Controllers\Api\Mission\MissionApplicationController;
-use App\Http\Controllers\Api\Mission\MissionReviewController;
-use App\Http\Controllers\Api\Mission\MissionReportController;
+use App\Http\Controllers\api\mission\MissionController;
+use App\Http\Controllers\api\mission\MissionApplicationController;
+use App\Http\Controllers\api\mission\MissionReviewController;
+use App\Http\Controllers\api\mission\MissionReportController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function () {
