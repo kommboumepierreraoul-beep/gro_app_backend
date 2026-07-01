@@ -1,5 +1,6 @@
 <?php
 
+namespace App\Providers;
 
 use App\Services\Moderation\Contracts\AIModerationInterface;
 use App\Services\Moderation\Providers\GroqModerationProvider;

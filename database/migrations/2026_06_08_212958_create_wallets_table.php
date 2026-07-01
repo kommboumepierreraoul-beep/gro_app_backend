@@ -11,17 +11,12 @@ return new class extends Migration
         Schema::create('wallets', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('order_id')->nullable()->constrained()->nullOnDelete();
-            $table->decimal('amount', 15, 2);
-            $table->enum('type', ['credit', 'debit']);
-            $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
-            $table->string('reference')->nullable()->unique();
-            $table->decimal('balance_before', 15, 2)->default(0);
-            $table->decimal('balance_after', 15, 2)->default(0);
-            $table->text('description')->nullable();
-            $table->json('metadata')->nullable();
-            $table->timestamp('completed_at')->nullable();
+            $table->decimal('balance', 15, 2)->default(0);
+            $table->decimal('total_credited', 15, 2)->default(0);
+            $table->decimal('total_debited', 15, 2)->default(0);
+            $table->string('currency', 3)->default('XAF');
             $table->timestamps();
+            $table->unique('user_id');
         });
     }
 

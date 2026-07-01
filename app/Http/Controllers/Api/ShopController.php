@@ -121,6 +121,4 @@ class ShopController extends Controller
     // ✅ Passer en seller automatiquement
         $user->update(['role' => 'seller']);
 }
-
-
 }
