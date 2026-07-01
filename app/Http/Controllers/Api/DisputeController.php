@@ -118,7 +118,7 @@ class DisputeController extends Controller
         try {
             Mail::to($dispute->seller->email)->send(new DisputeCreatedMail($dispute));
             $dispute->seller->notify(new DisputeCreatedNotification($dispute));
-            Mail::to(config('mail.admin_address', 'admin@agriconnect.com'))->send(new DisputeCreatedMail($dispute));
+            Mail::to(config('mail.admin_address', 'admin@agripulse.com'))->send(new DisputeCreatedMail($dispute));
         } catch (\Exception $e) {
             Log::error('Email litige échoué : ' . $e->getMessage());
         }
@@ -157,7 +157,7 @@ class DisputeController extends Controller
         try {
             Mail::to($dispute->user->email)->send(new DisputeRespondedMail($dispute));
             $dispute->user->notify(new DisputeRespondedNotification($dispute));
-            Mail::to(config('mail.admin_address', 'admin@agriconnect.com'))->send(new DisputeRespondedMail($dispute));
+            Mail::to(config('mail.admin_address', 'admin@agripulse.com'))->send(new DisputeRespondedMail($dispute));
         } catch (\Exception $e) {
             Log::error('Email réponse litige échoué : ' . $e->getMessage());
         }
