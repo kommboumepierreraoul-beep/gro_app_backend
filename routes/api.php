@@ -155,24 +155,24 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ADMIN
-    Route::prefix('admin')->group(function () {
-        Route::get('products/pending', [AdminProductController::class, 'pendingProducts']);
-        Route::post('products/{id}/approve', [AdminProductController::class, 'approveProduct']);
-        Route::post('products/{id}/reject', [AdminProductController::class, 'rejectProduct']);
-        Route::get('products', [AdminProductController::class, 'allProducts']);
-        Route::delete('products/{id}', [AdminProductController::class, 'deleteProduct']);
+    // Route::prefix('admin')->group(function () {
+    //     Route::get('products/pending', [AdminProductController::class, 'pendingProducts']);
+    //     Route::post('products/{id}/approve', [AdminProductController::class, 'approveProduct']);
+    //     Route::post('products/{id}/reject', [AdminProductController::class, 'rejectProduct']);
+    //     Route::get('products', [AdminProductController::class, 'allProducts']);
+    //     Route::delete('products/{id}', [AdminProductController::class, 'deleteProduct']);
 
-        Route::get('users', [AdminUserController::class, 'allUsers']);
-        Route::post('users/{id}/suspend', [AdminUserController::class, 'suspendUser']);
-        Route::post('users/{id}/unsuspend', [AdminUserController::class, 'unsuspendUser']);
-        Route::delete('users/{id}', [AdminUserController::class, 'deleteUser']);
+    //     Route::get('users', [AdminUserController::class, 'allUsers']);
+    //     Route::post('users/{id}/suspend', [AdminUserController::class, 'suspendUser']);
+    //     Route::post('users/{id}/unsuspend', [AdminUserController::class, 'unsuspendUser']);
+    //     Route::delete('users/{id}', [AdminUserController::class, 'deleteUser']);
 
-        Route::get('activities', [AdminActivityController::class, 'getActivityLog']);
-        Route::get('analytics', [AdminAnalyticsController::class, 'getAnalytics']);
-        Route::apiResource('categories', AdminCategoryController::class);
+    //     Route::get('activities', [AdminActivityController::class, 'getActivityLog']);
+    //     Route::get('analytics', [AdminAnalyticsController::class, 'getAnalytics']);
+    //     Route::apiResource('categories', AdminCategoryController::class);
 
-        Route::get('/orders', [OrderController::class, 'adminOrders']);
-    });
+    //     Route::get('/orders', [OrderController::class, 'adminOrders']);
+    // });
 
     // NOTIFICATIONS
     Route::prefix('notifications')->group(function () {
