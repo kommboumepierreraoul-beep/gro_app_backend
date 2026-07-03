@@ -1,57 +1,85 @@
 FROM php:8.4-apache
 
+# -----------------------------
 # Dépendances système
+# -----------------------------
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
     zip \
     curl \
     libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
     libonig-dev \
     libxml2-dev \
     libzip-dev \
-    libpq-dev
+    libpq-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install \
+        pdo \
+        pdo_pgsql \
+        pgsql \
+        mbstring \
+        bcmath \
+        gd \
+        zip \
+        opcache \
+    && rm -rf /var/lib/apt/lists/*
 
-# Extensions PHP Laravel + PostgreSQL
-RUN docker-php-ext-install \
-    pdo \
-    pdo_pgsql \
-    mbstring \
-    bcmath \
-    gd \
-    zip
-
-# Activer mod_rewrite
+# -----------------------------
+# Apache
+# -----------------------------
 RUN a2enmod rewrite
 
-# Installer Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-
-# Dossier de travail
-WORKDIR /var/www/html
-
-# Copier projet
-COPY . .
-
-# Installer dépendances
-RUN composer install --no-dev --optimize-autoloader
-
-# Permissions
-RUN chmod -R 775 storage bootstrap/cache
-
-# Apache -> public Laravel
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
+RUN sed -ri \
+    -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
     /etc/apache2/sites-available/*.conf \
     /etc/apache2/apache2.conf \
     /etc/apache2/conf-available/*.conf
 
-# Optimisations Laravel
-RUN php artisan config:cache || true
-RUN php artisan route:cache || true
-RUN php artisan view:cache || true
+# -----------------------------
+# Composer
+# -----------------------------
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+COPY composer.json composer.lock ./
+
+RUN composer install \
+    --no-dev \
+    --prefer-dist \
+    --no-interaction \
+    --optimize-autoloader
+
+COPY . .
+
+RUN composer dump-autoload --optimize
+
+# -----------------------------
+# Permissions
+# -----------------------------
+RUN mkdir -p storage/framework/cache \
+    storage/framework/views \
+    storage/framework/sessions \
+    bootstrap/cache
+
+RUN chown -R www-data:www-data storage bootstrap/cache
+
+RUN chmod -R 775 storage bootstrap/cache
+
+# -----------------------------
+# Entrypoint
+# -----------------------------
+COPY docker/entrypoint.sh /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 80
+
+ENTRYPOINT ["/entrypoint.sh"]
 
 CMD ["apache2-foreground"]
