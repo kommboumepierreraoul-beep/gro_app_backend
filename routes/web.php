@@ -71,7 +71,7 @@ Route::get('/', function () {
 //     return 'Email envoyé !';
 // });
 
-// Route::get('/auth/google/callback', [AuthController::class, 'callback']);
+Route::get('/auth/google/callback', [AuthController::class, 'callback']);
 
 // Route::get('/test-ssl', function () {
 //     return file_get_contents('https://www.google.com');
