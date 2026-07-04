@@ -29,17 +29,17 @@ use App\Http\Controllers\Api\Admin\{
 // =====================================================
 // AUTH PUBLIQUE
 // =====================================================
-Route::prefix('auth')->group(function () {
-    Route::post('/register', [AuthController::class, 'registerUser']);
-    Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
-});
+// Route::prefix('auth')->group(function () {
+//     Route::post('/register', [AuthController::class, 'registerUser']);
+//     Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
+//     Route::post('/login', [AuthController::class, 'login']);
+//     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+//     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+// });
 
-// OAuth Google
-Route::get('/auth/google', [AuthController::class, 'redirect']);
-Route::get('/auth/google/callback', [AuthController::class, 'callback']);
+// // OAuth Google
+// Route::get('/auth/google', [AuthController::class, 'redirect']);
+// Route::get('/auth/google/callback', [AuthController::class, 'callback']);
 
 // =====================================================
 // ROUTES PUBLIQUES
@@ -197,6 +197,7 @@ require __DIR__.'/marketplace/marketplace.php';
 require __DIR__.'/AI/ai.php';
 require __DIR__.'/mission/mission.php';
 require __DIR__.'/moderation/moderation.php';
+require __DIR__.'/auth/auth.php';
 
 // =====================================================
 // CORS & OPTIONS

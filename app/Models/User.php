@@ -104,6 +104,8 @@ class User extends Authenticatable implements MustVerifyEmail
         'phone',
         'role',
         'status',
+        'google_id',
+        'gender',
         'email_verified_at',
         'publishing_blocked_until',
     ];

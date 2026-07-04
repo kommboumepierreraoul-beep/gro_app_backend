@@ -123,5 +123,14 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'frontend' => [
+        'url' => env('FRONTEND_URL', 'http://localhost:3000'),
+        'paths' => [
+            'login' => env('FRONTEND_LOGIN_PATH', '/login'),
+            'community' => env('FRONTEND_COMMUNITY_PATH', '/community'),
+            'oauth_callback' => env('FRONTEND_OAUTH_CALLBACK_PATH', '/oauth-callback'),
+        ],
+    ],
+
     
 ];
