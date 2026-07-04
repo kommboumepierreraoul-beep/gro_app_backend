@@ -9,8 +9,11 @@ use Illuminate\Http\{JsonResponse, Request};
 class FollowController extends Controller
 {
     // Suivre / Ne plus suivre
-    public function toggle(Request $request, int $userId): JsonResponse
+    public function toggle(Request $request, $userId): JsonResponse  // ✅ Supprimer le typage int
     {
+        // ✅ Conversion en int
+        $userId = (int) $userId;
+
         $target = User::findOrFail($userId);
         $user   = $request->user();
 
@@ -43,8 +46,11 @@ class FollowController extends Controller
     }
 
     // Abonnés d'un utilisateur
-    public function followers(int $userId): JsonResponse
+    public function followers($userId): JsonResponse  // ✅ Supprimer le typage int
     {
+        // ✅ Conversion en int
+        $userId = (int) $userId;
+
         User::findOrFail($userId);
         $followers = Follow::with('follower.profile')
             ->where('following_id', $userId)
@@ -54,8 +60,11 @@ class FollowController extends Controller
     }
 
     // Abonnements d'un utilisateur
-    public function following(int $userId): JsonResponse
+    public function following($userId): JsonResponse  // ✅ Supprimer le typage int
     {
+        // ✅ Conversion en int
+        $userId = (int) $userId;
+
         User::findOrFail($userId);
         $following = Follow::with('following.profile')
             ->where('follower_id', $userId)
