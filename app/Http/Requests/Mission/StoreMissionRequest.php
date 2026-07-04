@@ -24,7 +24,7 @@ class StoreMissionRequest extends FormRequest
             'duration_type'            => 'required|in:hours,day,days,weeks,flexible',
             'duration_value'           => 'nullable|required_unless:duration_type,flexible|integer|min:1|max:365',
             'start_date'               => 'nullable|date|after_or_equal:today',
-            'expires_at'               => 'nullable|date|after:start_date|before:' . now()->addMonths(6)->toDateString(),
+            'expires_at'               => 'nullable|date|before:' . now()->addMonths(6)->toDateString(),
 
             // Localisation
             'latitude'                 => 'nullable|numeric|between:-90,90',

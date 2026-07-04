@@ -309,9 +309,16 @@ class MissionApplicationController extends Controller
 
         $query = MissionApplication::where('applicant_id', $request->user()->id)
             ->with([
+                'applicant' => function ($query) {
+                    $query->select('id', 'firstname', 'lastname', 'email')
+                        ->with(['profile:id,user_id,avatar']);
+                },
                 'mission:id,ulid,title,status,start_date,location_label,remuneration_type,remuneration_amount,remuneration_currency',
                 'mission.category:id,name,slug,icon,color',
-                'mission.author:id,name,avatar',
+                'mission.author' => function ($query) {
+                    $query->select('id', 'firstname', 'lastname', 'email')
+                        ->with(['profile:id,user_id,avatar']);
+                },
             ])
             ->orderByDesc('created_at');
 
@@ -320,8 +327,28 @@ class MissionApplicationController extends Controller
         }
 
         $perPage = $request->integer('per_page', 15);
+        $applications = $query->paginate($perPage);
 
-        return response()->json($query->paginate($perPage));
+        $applications->getCollection()->transform(function ($application) {
+            if ($application->applicant) {
+                $application->applicant->avatar = $application->applicant->profile?->avatar;
+                $application->applicant->name = $application->applicant->name
+                    ?: trim(implode(' ', array_filter([$application->applicant->firstname, $application->applicant->lastname]))) ?: null;
+                unset($application->applicant->profile);
+            }
+
+            if ($application->mission && $application->mission->author) {
+                $author = $application->mission->author;
+                $author->avatar = $author->profile?->avatar;
+                $author->name = $author->name
+                    ?: trim(implode(' ', array_filter([$author->firstname, $author->lastname]))) ?: null;
+                unset($author->profile);
+            }
+
+            return $application;
+        });
+
+        return response()->json($applications);
     }
 
     // ── Retirer une candidature ───────────────────────────────────────────

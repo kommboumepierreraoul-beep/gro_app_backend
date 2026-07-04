@@ -29,6 +29,8 @@ class MissionDetailResource extends JsonResource
             'author' => $this->whenLoaded('author', fn() => [
                 'id'            => $this->author->id,
                 'name'          => $this->author->name,
+                'firstname'     => $this->author->firstname,
+                'lastname'      => $this->author->lastname,
                 'avatar'        => $this->author->avatar,
                 'rating'        => $this->author->mission_rating ?? null,
                 'reviews_count' => $this->author->mission_reviews_count ?? null,

@@ -28,9 +28,11 @@ class MissionResource extends JsonResource
 
             // Auteur
             'author'            => $this->whenLoaded('author', fn() => [
-                'id'     => $this->author->id,
-                'name'   => $this->author->name,
-                'avatar' => $this->author->avatar,
+                'id'        => $this->author->id,
+                'name'      => $this->author->name,
+                'firstname' => $this->author->firstname,
+                'lastname'  => $this->author->lastname,
+                'avatar'    => $this->author->profile?->avatar,
             ]),
 
             // Durée

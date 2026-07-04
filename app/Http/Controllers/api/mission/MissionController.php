@@ -141,21 +141,21 @@ class MissionController extends Controller
     public function show(Request $request, string $ulid): MissionDetailResource
     {
         $mission = Mission::where('ulid', $ulid)
-    ->with([
-        'author' => function($query) {
-            $query->select('id', 'firstname')
-                  ->with('profile:id,user_id,avatar');
-        },
-        'category:id,name,slug,icon,color',
-        'reviews.reviewer' => function($query) {
-            $query->select('id', 'firstname')
-                  ->with('profile:id,user_id,avatar');
-        },
-    ])
-    ->withCount(['applications', 'applications as accepted_count' => function ($q) {
-        $q->where('status', 'accepted');
-    }])
-    ->firstOrFail();
+            ->with([
+                'author' => function ($query) {
+                    $query->select('id', 'firstname')
+                        ->with('profile:id,user_id,avatar');
+                },
+                'category:id,name,slug,icon,color',
+                'reviews.reviewer' => function ($query) {
+                    $query->select('id', 'firstname')
+                        ->with('profile:id,user_id,avatar');
+                },
+            ])
+            ->withCount(['applications', 'applications as accepted_count' => function ($q) {
+                $q->where('status', 'accepted');
+            }])
+            ->firstOrFail();
 
         // Enregistrer la vue en asynchrone
         RecordMissionViewJob::dispatch(
@@ -401,7 +401,8 @@ class MissionController extends Controller
         $query = Mission::forAuthor($request->user()->id)
             ->with([
                 'category:id,name,slug,icon,color',
-                'author:id'
+                'author:id,firstname,lastname',
+                'author.profile:id,user_id,avatar'
             ])
             ->withCount(['applications', 'applications as pending_count' => function ($q) {
                 $q->where('status', 'pending');
@@ -411,7 +412,7 @@ class MissionController extends Controller
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
-        
+
 
         return MissionResource::collection($query->paginate($request->integer('per_page', 15)));
     }
