@@ -63,6 +63,17 @@ Route::get('/test-gmail', function () {
 });
 
 
+Route::get('/debug/mail', function () {
+    return [
+        'mailer' => config('mail.default'),
+        'host' => config('mail.mailers.smtp.host'),
+        'port' => config('mail.mailers.smtp.port'),
+        'encryption' => config('mail.mailers.smtp.encryption'),
+        'username' => config('mail.mailers.smtp.username'),
+    ];
+});
+
+
 // Route::get('/test-brevo', function () {
 //     \Illuminate\Support\Facades\Mail::raw(
 //         '✅ Test Brevo SMTP OK depuis Laravel !',
