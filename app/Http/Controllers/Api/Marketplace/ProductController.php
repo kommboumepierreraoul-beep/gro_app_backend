@@ -152,7 +152,7 @@ class ProductController extends Controller
     public function show($id)
     {
         $product = Product::with([
-            'shop:id,name,slug,logo',
+            'shop:id,user_id,name,slug,logo',
             'category:id,name,slug',
             'reviews.user:id,firstname,lastname',
         ])->findOrFail($id);

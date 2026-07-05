@@ -50,11 +50,13 @@ public function approveProduct($id)
     
     $product = Product::with('shop.user')->findOrFail($id);
 
-    $product->update([
+    $product->forceFill([
         'approval_status' => 'approved',
         'status' => 'active',
         'rejection_reason' => null
-    ]);
+    ])->save();
+
+    $product->refresh();
 
     // Ajouter à la timeline
     ActivityLog::log(
@@ -104,11 +106,13 @@ public function rejectProduct(Request $request, $id)
 
     $product = Product::with('shop.user')->findOrFail($id);
 
-    $product->update([
+    $product->forceFill([
         'approval_status' => 'rejected',
-        'status' => 'inactive',
+        'status' => 'draft',
         'rejection_reason' => $request->reason
-    ]);
+    ])->save();
+
+    $product->refresh();
 
     // Ajouter à la timeline
     ActivityLog::log(

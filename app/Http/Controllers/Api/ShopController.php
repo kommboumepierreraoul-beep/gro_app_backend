@@ -10,6 +10,13 @@ use Illuminate\Support\Facades\Log;
 
 class ShopController extends Controller
 {
+    private function promoteToSellerIfNeeded($user): void
+    {
+        if (!$user->isAdmin() && $user->role === 'user') {
+            $user->update(['role' => 'seller']);
+        }
+    }
+
     public function index(Request $request)
 {
     // On récupère uniquement la boutique appartenant à l'utilisateur connecté
@@ -65,7 +72,7 @@ class ShopController extends Controller
         'phone'       => $request->phone,
         'status'      => 'active',
     ]);
-    $user->update(['role' => 'seller']);
+    $this->promoteToSellerIfNeeded($user);
 
     return response()->json(['success' => true, 'data' => $shop], 201);
 }
@@ -119,6 +126,5 @@ class ShopController extends Controller
     return response()->json(['success' => true, 'data' => $shop]);
 
     // ✅ Passer en seller automatiquement
-        $user->update(['role' => 'seller']);
 }
 }
