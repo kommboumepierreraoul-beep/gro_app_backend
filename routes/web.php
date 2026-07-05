@@ -74,13 +74,30 @@ Route::get('/debug/mail', function () {
 });
 
 
-// Route::get('/test-brevo', function () {
-//     \Illuminate\Support\Facades\Mail::raw(
-//         '✅ Test Brevo SMTP OK depuis Laravel !',
-//         fn($m) => $m->to('raoulkm2006@gmail.com')->subject('Test Brevo')
-//     );
-//     return 'Email envoyé !';
-// });
+
+Route::get('/test-brevo', function () {
+
+    try {
+
+        Mail::raw('✅ Félicitations ! Brevo fonctionne correctement avec Laravel.', function ($message) {
+
+            $message->to('kommboumepierreraoul@gmail.com') // Remplace par ton adresse
+                ->subject('Test SMTP Brevo');
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email envoyé avec succès.'
+        ]);
+    } catch (\Exception $e) {
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Échec de l\'envoi.',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
 
 Route::get('/auth/google/callback', [AuthController::class, 'callback']);
 
