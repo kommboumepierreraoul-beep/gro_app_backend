@@ -1,45 +1,20 @@
 <?php
 
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Api\{
-    AuthController,
     CategoryController,
     ProductReviewController,
     OrderController,
     WishlistController,
     WalletController,
     TransactionController,
-    NotchpayWebhookController,
     InvoiceController,
     DisputeController,
 };
 
 
 use App\Http\Controllers\Api\Marketplace\{ProductController, ShopController};
-use App\Http\Controllers\Api\Admin\{
-    AdminProductController,
-    AdminUserController,
-    AdminActivityController,
-    AdminAnalyticsController,
-    AdminCategoryController
-};
-
-// =====================================================
-// AUTH PUBLIQUE
-// =====================================================
-// Route::prefix('auth')->group(function () {
-//     Route::post('/register', [AuthController::class, 'registerUser']);
-//     Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
-//     Route::post('/login', [AuthController::class, 'login']);
-//     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-//     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
-// });
-
-// // OAuth Google
-// Route::get('/auth/google', [AuthController::class, 'redirect']);
-// Route::get('/auth/google/callback', [AuthController::class, 'callback']);
 
 // =====================================================
 // ROUTES PUBLIQUES
@@ -56,13 +31,6 @@ Route::get('/track-order/{orderNumber}', [OrderController::class, 'trackOrder'])
 Route::get('/tracking/{orderNumber}', [OrderController::class, 'getTrackingData']);
 
 // =====================================================
-// LOGIN FALLBACK
-// =====================================================
-Route::get('/login', function () {
-    return response()->json(['message' => 'Unauthenticated'], 401);
-})->name('login');
-
-// =====================================================
 // WEBHOOKS (sans auth)
 // =====================================================
 Route::match(['get', 'post'], '/webhooks/notchpay', [OrderController::class, 'handleNotchPayWebhook']);
@@ -74,24 +42,6 @@ Route::match(['get', 'post'], '/wallet/deposit/callback', [WalletController::cla
 // ROUTES AUTHENTIFIÉES
 // =====================================================
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/user', fn (Request $request) => $request->user());
-
-    // AUTH (email verification + token management)
-    Route::prefix('auth')->group(function () {
-        Route::post('/email/resend', [AuthController::class, 'sendVerificationCode']);
-        Route::post('/email/verify', [AuthController::class, 'verifyEmail']);
-        Route::post('/refresh', [AuthController::class, 'refreshToken']);
-        Route::post('/logout', [AuthController::class, 'logout']);
-        Route::post('/logout/all', [AuthController::class, 'logoutAll']);
-    });
-
-    // AUTH + VERIFIED EMAIL (profile & password)
-    Route::middleware('verified.email')->prefix('auth')->group(function () {
-        Route::get('/profile', [AuthController::class, 'profile']);
-        Route::put('/profile', [AuthController::class, 'updateProfile']);
-        Route::put('/password', [AuthController::class, 'changePassword']);
-    });
-
     // BOUTIQUE & PRODUITS
     Route::get('/my-shop/profile', [ShopController::class, 'myShopProfile']);
     Route::get('/my-shop/products', [ProductController::class, 'myProducts']);
@@ -154,25 +104,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{dispute}/resolve', [DisputeController::class, 'resolve']);
     });
 
-    Route::prefix('admin')->group(function () {
-        Route::get('products/pending', [AdminProductController::class, 'pendingProducts']);
-        Route::post('products/{id}/approve', [AdminProductController::class, 'approveProduct']);
-        Route::post('products/{id}/reject', [AdminProductController::class, 'rejectProduct']);
-        Route::get('products', [AdminProductController::class, 'allProducts']);
-        Route::delete('products/{id}', [AdminProductController::class, 'deleteProduct']);
-
-        Route::get('users', [AdminUserController::class, 'allUsers']);
-        Route::post('users/{id}/suspend', [AdminUserController::class, 'suspendUser']);
-        Route::post('users/{id}/unsuspend', [AdminUserController::class, 'unsuspendUser']);
-        Route::delete('users/{id}', [AdminUserController::class, 'deleteUser']);
-
-        Route::get('activities', [AdminActivityController::class, 'getActivityLog']);
-        Route::get('analytics', [AdminAnalyticsController::class, 'getAnalytics']);
-        Route::apiResource('categories', AdminCategoryController::class);
-
-        Route::get('/orders', [OrderController::class, 'adminOrders']);
-    });
-
     // NOTIFICATIONS
     Route::prefix('notifications')->group(function () {
         Route::get('/', [App\Http\Controllers\Api\NotificationController::class, 'index']);
@@ -197,23 +128,4 @@ require __DIR__.'/AI/ai.php';
 require __DIR__.'/mission/mission.php';
 require __DIR__.'/moderation/moderation.php';
 require __DIR__.'/auth/auth.php';
-
-// =====================================================
-// CORS & OPTIONS
-// =====================================================
-Route::options('/{any}', function () {
-    return response()->json([], 200)
-        ->header('Access-Control-Allow-Origin', 'http://localhost:3000')
-        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-CSRF-TOKEN')
-        ->header('Access-Control-Allow-Credentials', 'true');
-})->where('any', '.*');
-
-// Route de test CORS
-Route::get('/cors-test', function () {
-    return response()->json([
-        'message' => 'CORS is working!',
-        'timestamp' => now(),
-        'headers' => request()->headers->all()
-    ]);
-});
+require __DIR__.'/admin/admin.php';

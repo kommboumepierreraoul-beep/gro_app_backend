@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Admin\AdminUserController;
 use App\Http\Controllers\Api\Admin\AdminActivityController;
 use App\Http\Controllers\Api\Admin\AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\AdminCategoryController;
+use App\Http\Controllers\Api\OrderController;
 use Illuminate\Support\Facades\Route;
 
 // ========== ADMIN ROUTES - Authentifié obligatoire ==========
@@ -31,5 +32,8 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::get('analytics', [AdminAnalyticsController::class, 'getAnalytics']);
     
     // Catégories
-    Route::apiResource('categories', AdminCategoryController::class);
+    Route::apiResource('categories', AdminCategoryController::class)->names('admin.categories');
+
+    // Commandes
+    Route::get('orders', [OrderController::class, 'adminOrders']);
 });
