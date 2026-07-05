@@ -638,7 +638,7 @@ class AuthController extends Controller
             );
 
             // 7. Redirection vers le frontend
-            $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+            $frontendUrl = config('app.frontend_url');
             $redirectUrl = "{$frontendUrl}/oauth-callback?token={$token}";
 
             Log::info('Redirecting to frontend', ['url' => $redirectUrl]);
