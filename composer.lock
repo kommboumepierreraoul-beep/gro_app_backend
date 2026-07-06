@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "fd0e654f21db85f64028bfb791727af7",
+    "content-hash": "b5c542db90e68605c280cded4f115c44",
     "packages": [
         {
             "name": "brick/math",
@@ -820,6 +820,59 @@
                 }
             ],
             "time": "2025-12-03T09:33:47+00:00"
+        },
+        {
+            "name": "getbrevo/brevo-php",
+            "version": "5.0.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/getbrevo/brevo-php.git",
+                "reference": "227c17e33bd67b6f9c13b838f74c37a3d885ab27"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/getbrevo/brevo-php/zipball/227c17e33bd67b6f9c13b838f74c37a3d885ab27",
+                "reference": "227c17e33bd67b6f9c13b838f74c37a3d885ab27",
+                "shasum": ""
+            },
+            "require": {
+                "ext-json": "*",
+                "php": "^8.1",
+                "php-http/discovery": "^1.0",
+                "php-http/multipart-stream-builder": "^1.0",
+                "psr/http-client": "^1.0",
+                "psr/http-client-implementation": "^1.0",
+                "psr/http-factory": "^1.0",
+                "psr/http-factory-implementation": "^1.0",
+                "psr/http-message": "^1.1 || ^2.0"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "3.5.0",
+                "guzzlehttp/guzzle": "^7.4",
+                "phpstan/phpstan": "^1.12",
+                "phpunit/phpunit": "^12.5.22"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Brevo\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Official PHP SDK for the Brevo API.",
+            "keywords": [
+                "api",
+                "brevo",
+                "sdk"
+            ],
+            "support": {
+                "issues": "https://github.com/getbrevo/brevo-php/issues",
+                "source": "https://github.com/getbrevo/brevo-php/tree/v5.0.1"
+            },
+            "time": "2026-07-03T12:32:58+00:00"
         },
         {
             "name": "graham-campbell/result-type",

@@ -11,6 +11,7 @@
     "require": {
         "php": "^8.3",
         "deepseek-php/deepseek-php-client": "^2.1",
+        "getbrevo/brevo-php": "^5.0",
         "intervention/image": "^4.1",
         "laravel/framework": "^13.8",
         "laravel/sanctum": "^4.2",

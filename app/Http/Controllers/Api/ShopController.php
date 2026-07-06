@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Shop;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
@@ -52,11 +53,12 @@ class ShopController extends Controller
 
     // 3. Gestion correcte des fichiers
     if ($request->hasFile('logo')) {
-        // store() retourne le chemin relatif (ex: shops/logos/nomimage.jpg)
-        $logoPath = $request->file('logo')->store('shops/logos', 'public');
+        $logoPath = app(CloudinaryService::class)
+            ->uploadImageUrl($request->file('logo'), 'agripulse/shops/logos');
     }
     if ($request->hasFile('banner')) {
-        $bannerPath = $request->file('banner')->store('shops/banners', 'public');
+        $bannerPath = app(CloudinaryService::class)
+            ->uploadImageUrl($request->file('banner'), 'agripulse/shops/banners');
     }
 
     // 4. Création avec les chemins de stockage
@@ -120,8 +122,12 @@ class ShopController extends Controller
         return response()->json(['success' => false, 'message' => 'Boutique introuvable'], 404);
     }
 
-    $shop->logo = $shop->logo ? asset('storage/' . $shop->logo) : null;
-    $shop->banner = $shop->banner ? asset('storage/' . $shop->banner) : null;
+    $shop->logo = $shop->logo && !str_starts_with($shop->logo, 'http')
+        ? asset('storage/' . $shop->logo)
+        : $shop->logo;
+    $shop->banner = $shop->banner && !str_starts_with($shop->banner, 'http')
+        ? asset('storage/' . $shop->banner)
+        : $shop->banner;
 
     return response()->json(['success' => true, 'data' => $shop]);
 

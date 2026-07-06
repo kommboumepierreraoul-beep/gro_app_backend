@@ -7,12 +7,12 @@ use App\Models\Post;
 use App\Models\Like;
 use App\Models\CommunityNotification;
 use App\Models\ModerationPost;
+use App\Services\CloudinaryService;
 use App\Services\Moderation\FastModerationLayer;
 use App\Services\Moderation\SyncModerationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 
@@ -41,66 +41,6 @@ class PostController extends Controller
         $this->syncModeration = $syncModeration;
     }
 
-    /**
-     * 10. RECHERCHER DES POSTS
-     * GET /api/community/posts/search?q=keyword
-     */
-    public function search(Request $request): JsonResponse
-    {
-        try {
-            $query = $request->input('q');
-
-            // Vérifier que la requête est valide
-            if (!$query || strlen(trim($query)) < 2) {
-                return response()->json([
-                    'success' => true,
-                    'data' => [],
-                    'message' => 'Requête trop courte (minimum 2 caractères)'
-                ]);
-            }
-
-            $user = $request->user();
-            $searchTerm = trim($query);
-
-            // ✅ Rechercher dans les posts
-            $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
-                ->where(function ($q) use ($searchTerm) {
-                    $q->where('content', 'LIKE', "%{$searchTerm}%")
-                        ->orWhere('title', 'LIKE', "%{$searchTerm}%");
-                })
-                ->whereHas('moderation', function ($q) {
-                    $q->where('status', 'approved');
-                })
-                ->orderBy('created_at', 'desc')
-                ->paginate(20);
-
-            // Formater les posts
-            $posts->getCollection()->transform(
-                fn($post) =>
-                $this->formatPost($post, $user?->id)
-            );
-
-            return response()->json([
-                'success' => true,
-                'data' => $posts,
-                'query' => $searchTerm,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Erreur recherche posts: ' . $e->getMessage(), [
-                'query' => $request->input('q'),
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erreur lors de la recherche',
-            ], 500);
-        }
-    }
-    // ────────────────────────────────────────────────────────────────────────────
-    // 1. FEED PAGINÉ
-    // ────────────────────────────────────────────────────────────────────────────
-
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -118,16 +58,58 @@ class PostController extends Controller
         return response()->json(['success' => true, 'data' => $posts]);
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // 2. CRÉER UN POST AVEC MODÉRATION EN TEMPS RÉEL
-    // ────────────────────────────────────────────────────────────────────────────
+    public function search(Request $request): JsonResponse
+    {
+        try {
+            $query = $request->input('q');
+
+            if (!$query || strlen(trim($query)) < 2) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [],
+                    'message' => 'Requête trop courte (minimum 2 caractères)',
+                ]);
+            }
+
+            $user = $request->user();
+            $searchTerm = trim($query);
+
+            $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+                ->where(function ($q) use ($searchTerm) {
+                    $q->where('content', 'LIKE', "%{$searchTerm}%")
+                        ->orWhere('title', 'LIKE', "%{$searchTerm}%");
+                })
+                ->whereHas('moderation', function ($q) {
+                    $q->where('status', 'approved');
+                })
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
+
+            $posts->getCollection()->transform(
+                fn($post) => $this->formatPost($post, $user?->id)
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => $posts,
+                'query' => $searchTerm,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erreur recherche posts: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la recherche',
+            ], 500);
+        }
+    }
 
     public function store(Request $request): JsonResponse
     {
         Log::info('=== STORE POST ===', [
-            'files'   => array_keys($request->allFiles()),
+            'files' => array_keys($request->allFiles()),
             'content' => $request->content,
-            'type'    => $request->type,
+            'type' => $request->type,
         ]);
 
         $user = $request->user();
@@ -136,7 +118,6 @@ class PostController extends Controller
             return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
         }
 
-        // Vérifier si l'utilisateur peut publier
         if (!$user->canPublish()) {
             return response()->json([
                 'success' => false,
@@ -144,23 +125,21 @@ class PostController extends Controller
             ], 403);
         }
 
-        // Validation
         $validator = Validator::make($request->all(), [
-            'content'        => 'nullable|string|max:20000',
-            'type'           => 'nullable|string|in:text,image,video,pdf,shared,announcement',
+            'content' => 'nullable|string|max:20000',
+            'type' => 'nullable|string|in:text,image,video,pdf,shared,announcement',
             'shared_post_id' => 'nullable|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors'  => $validator->errors(),
+                'errors' => $validator->errors(),
             ], 422);
         }
 
-        // Vérifier qu'il y a du contenu
         $hasContent = !empty(trim($request->content ?? ''));
-        $hasFiles   = count($request->allFiles()) > 0;
+        $hasFiles = count($request->allFiles()) > 0;
 
         if (!$hasContent && !$hasFiles && !$request->shared_post_id) {
             return response()->json([
@@ -169,23 +148,21 @@ class PostController extends Controller
             ], 422);
         }
 
-        $post = null;
         $moderationStatus = 'pending';
         $moderationMessage = 'Publication créée avec succès.';
 
         try {
-            // ✅ 1. Créer le post et la modération (dans une transaction)
             $post = DB::transaction(function () use ($request, $user) {
-                $mediaUrls    = [];
-                $pdfFiles     = [];
+                $mediaUrls = [];
+                $pdfFiles = [];
                 $detectedType = 'text';
 
-                // ── Upload des fichiers ──────────────────────────────────────────
                 $uploaded = [];
                 $allFiles = $request->allFiles();
 
-                foreach ($allFiles as $key => $files) {
+                foreach ($allFiles as $files) {
                     $files = is_array($files) ? $files : [$files];
+
                     foreach ($files as $file) {
                         $uploaded[] = $file;
                     }
@@ -206,41 +183,40 @@ class PostController extends Controller
 
                     $isImage = str_starts_with($mimeType, 'image/');
                     $isVideo = str_starts_with($mimeType, 'video/');
-                    $isPdf   = $mimeType === 'application/pdf';
+                    $isPdf = $mimeType === 'application/pdf';
 
-                    $maxBytes = $isVideo ? 200 * 1024 * 1024
-                        : ($isPdf  ? 20  * 1024 * 1024
-                            : 10  * 1024 * 1024);
+                    $maxBytes = $isVideo
+                        ? 200 * 1024 * 1024
+                        : ($isPdf ? 20 * 1024 * 1024 : 10 * 1024 * 1024);
 
                     if ($file->getSize() > $maxBytes) {
                         throw new \Exception("Fichier \"{$file->getClientOriginalName()}\" trop volumineux.");
                     }
 
-                    $folder    = $isVideo ? 'community/videos'
-                        : ($isPdf  ? 'community/pdfs'
-                            : 'community/posts');
+                    $cloudinaryFolder = match (true) {
+                        $isVideo => 'agripulse/community/videos',
+                        $isPdf => 'agripulse/community/pdfs',
+                        default => 'agripulse/community/posts',
+                    };
 
-                    $extension = $file->getClientOriginalExtension() ?: 'bin';
-                    $filename  = uniqid() . '_' . time() . '_' . $index . '.' . $extension;
-                    $path      = $file->storeAs($folder, $filename, 'public');
-
-                    if (!$path) {
-                        continue;
-                    }
-
-                    $url = asset('storage/' . $path);
+                    $url = app(CloudinaryService::class)
+                        ->uploadImageUrl($file, $cloudinaryFolder);
 
                     if ($isPdf) {
                         $pdfFiles[] = [
-                            'url'        => $url,
-                            'name'       => $file->getClientOriginalName(),
-                            'size'       => $file->getSize(),
+                            'url' => $url,
+                            'name' => $file->getClientOriginalName(),
+                            'size' => $file->getSize(),
                             'size_label' => $this->formatBytes($file->getSize()),
-                            'pages'      => null,
+                            'pages' => null,
                         ];
-                        if ($detectedType === 'text') $detectedType = 'pdf';
+
+                        if ($detectedType === 'text') {
+                            $detectedType = 'pdf';
+                        }
                     } else {
                         $mediaUrls[] = $url;
+
                         if ($detectedType === 'text') {
                             $detectedType = $isVideo ? 'video' : 'image';
                         }
@@ -248,24 +224,23 @@ class PostController extends Controller
                 }
 
                 $postType = $request->type ?? $detectedType;
+
                 if ($postType === 'text' && (count($mediaUrls) > 0 || count($pdfFiles) > 0)) {
                     $postType = $detectedType;
                 }
 
-                // ── Création du post ──────────────────────────────────────────────
                 $post = Post::create([
-                    'user_id'        => $user->id,
-                    'content'        => trim($request->content ?? ''),
-                    'type'           => $postType,
-                    'media_urls'     => $mediaUrls,
-                    'pdf_files'      => $pdfFiles,
+                    'user_id' => $user->id,
+                    'content' => trim($request->content ?? ''),
+                    'type' => $postType,
+                    'media_urls' => $mediaUrls,
+                    'pdf_files' => $pdfFiles,
                     'shared_post_id' => $request->shared_post_id,
-                    'likes_count'    => 0,
+                    'likes_count' => 0,
                     'comments_count' => 0,
-                    'shares_count'   => 0,
+                    'shares_count' => 0,
                 ]);
 
-                // ── Création de la modération (pending) ─────────────────────────
                 ModerationPost::create([
                     'post_id' => $post->id,
                     'status' => 'pending',
@@ -275,9 +250,7 @@ class PostController extends Controller
                 return $post;
             });
 
-            // ✅ 2. Modération (HORS transaction)
             try {
-                // Fast Moderation Layer
                 $fastDecision = $this->fastLayer->check($post->content, $user->id);
 
                 if ($fastDecision !== null) {
@@ -291,21 +264,10 @@ class PostController extends Controller
                             ? 'Contenu rejeté par les filtres automatiques'
                             : 'Contenu approuvé par les filtres automatiques',
                     ]);
-
-                    $post->moderation->auditLogs()->create([
-                        'action' => $fastDecision,
-                        'actor_type' => 'system',
-                        'actor_id' => null,
-                        'payload' => [
-                            'reason' => 'Fast moderation layer decision',
-                            'rule' => $fastDecision === 'rejected' ? 'blocklist/rate_limit' : 'duplicate',
-                        ],
-                    ]);
                 } else {
-                    // Analyse IA synchrone
                     $moderationResult = $this->syncModeration->moderatePostSync($post);
                     $moderationStatus = $moderationResult['status'];
-                    $moderationMessage = $this->getModerationMessage($moderationResult['status']);
+                    $moderationMessage = $this->getModerationMessage($moderationStatus);
 
                     $post->moderation->update([
                         'status' => $moderationStatus,
@@ -324,7 +286,6 @@ class PostController extends Controller
                     'error' => $e->getMessage(),
                 ]);
 
-                // ✅ Fallback : mettre en review
                 $post->moderation->update([
                     'status' => 'review',
                     'reason' => 'Erreur technique, vérification manuelle requise',
@@ -337,32 +298,16 @@ class PostController extends Controller
 
             $post->load(['author.profile', 'sharedPost.author', 'moderation']);
 
-            Log::info('Post créé:', [
-                'id' => $post->id,
-                'type' => $post->type,
-                'moderation_status' => $moderationStatus,
-            ]);
-
-            $responseData = $this->formatPost($post, $user->id);
-            $responseData['moderation'] = [
-                'status' => $post->moderation_status,
-                'reason' => $post->moderation_reason,
-                'scores' => [
-                    'toxicity' => $post->toxicity_score,
-                    'spam' => $post->spam_score,
-                    'hate' => $post->hate_score,
-                    'violence' => $post->violence_score,
-                ],
-            ];
-
             return response()->json([
                 'success' => true,
                 'message' => $moderationMessage,
-                'data' => $responseData,
+                'data' => $this->formatPost($post, $user->id),
                 'moderation_status' => $moderationStatus,
             ], 201);
         } catch (\Exception $e) {
-            Log::error('Erreur store post: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            Log::error('Erreur store post: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             return response()->json([
                 'success' => false,
@@ -371,21 +316,13 @@ class PostController extends Controller
         }
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // 3. VOIR UN POST
-    // ────────────────────────────────────────────────────────────────────────────
-
-    public function show(Request $request, $id): JsonResponse  // ✅ Accepter string ou int
+    public function show(Request $request, $id): JsonResponse
     {
         $user = $request->user();
 
-        // ✅ Convertir en int si nécessaire
-        $postId = is_numeric($id) ? (int) $id : $id;
-
         $post = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
-            ->findOrFail($postId);
+            ->findOrFail($id);
 
-        // Vérifier la visibilité
         if (!$post->isVisible() && $post->user_id !== $user?->id) {
             return response()->json([
                 'success' => false,
@@ -395,12 +332,9 @@ class PostController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $this->formatPost($post, $user?->id),
+            'data' => $this->formatPost($post, $user?->id),
         ]);
     }
-    // ────────────────────────────────────────────────────────────────────────────
-    // 4. MODIFIER UN POST
-    // ────────────────────────────────────────────────────────────────────────────
 
     public function update(Request $request, int $id): JsonResponse
     {
@@ -419,13 +353,13 @@ class PostController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        DB::beginTransaction();
-
         try {
-            // Mettre à jour le contenu
-            $post->update(['content' => $request->content]);
+            DB::beginTransaction();
 
-            // Réinitialiser la modération
+            $post->update([
+                'content' => $request->content,
+            ]);
+
             if ($post->moderation) {
                 $post->moderation->update([
                     'status' => 'pending',
@@ -442,9 +376,9 @@ class PostController extends Controller
 
             DB::commit();
 
-            // ✅ Modération HORS transaction
             try {
                 $moderationResult = $this->syncModeration->moderatePostSync($post);
+
                 if ($post->moderation) {
                     $post->moderation->update([
                         'status' => $moderationResult['status'],
@@ -458,7 +392,11 @@ class PostController extends Controller
                     ]);
                 }
             } catch (\Exception $e) {
-                Log::error('Erreur réanalyse', ['post_id' => $post->id, 'error' => $e->getMessage()]);
+                Log::error('Erreur réanalyse', [
+                    'post_id' => $post->id,
+                    'error' => $e->getMessage(),
+                ]);
+
                 if ($post->moderation) {
                     $post->moderation->update([
                         'status' => 'review',
@@ -470,20 +408,17 @@ class PostController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Publication mise à jour.',
-                'data'    => $this->formatPost($post->fresh(['author.profile', 'moderation']), $user->id),
+                'data' => $this->formatPost($post->fresh(['author.profile', 'moderation']), $user->id),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur serveur: ' . $e->getMessage(),
             ], 500);
         }
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // 5. SUPPRIMER UN POST
-    // ────────────────────────────────────────────────────────────────────────────
 
     public function destroy(Request $request, int $id): JsonResponse
     {
@@ -494,31 +429,17 @@ class PostController extends Controller
             return response()->json(['success' => false, 'message' => 'Action non autorisée.'], 403);
         }
 
-        // Supprimer les fichiers
-        foreach (array_merge($post->media_urls ?? [], array_column($post->pdf_files ?? [], 'url')) as $url) {
-            try {
-                $path = str_replace('/storage/', '', parse_url($url, PHP_URL_PATH));
-                if ($path && Storage::disk('public')->exists($path)) {
-                    Storage::disk('public')->delete($path);
-                }
-            } catch (\Exception $e) {
-                Log::error('Erreur suppression fichier: ' . $e->getMessage());
-            }
-        }
-
-        // Supprimer la modération
         if ($post->moderation) {
             $post->moderation->delete();
         }
 
         $post->delete();
 
-        return response()->json(['success' => true, 'message' => 'Publication supprimée.']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Publication supprimée.',
+        ]);
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // 6. LIKE / UNLIKE
-    // ────────────────────────────────────────────────────────────────────────────
 
     public function toggleLike(Request $request, int $id): JsonResponse
     {
@@ -534,9 +455,9 @@ class PostController extends Controller
         }
 
         $like = Like::where([
-            'user_id'       => $user->id,
+            'user_id' => $user->id,
             'likeable_type' => Post::class,
-            'likeable_id'   => $post->id,
+            'likeable_id' => $post->id,
         ])->first();
 
         if ($like) {
@@ -545,37 +466,32 @@ class PostController extends Controller
             $liked = false;
         } else {
             Like::create([
-                'user_id'       => $user->id,
+                'user_id' => $user->id,
                 'likeable_type' => Post::class,
-                'likeable_id'   => $post->id,
+                'likeable_id' => $post->id,
             ]);
+
             $post->increment('likes_count');
             $liked = true;
 
             if ($post->user_id !== $user->id) {
                 CommunityNotification::create([
-                    'user_id'         => $post->user_id,
-                    'actor_id'        => $user->id,
-                    'type'            => 'like_post',
+                    'user_id' => $post->user_id,
+                    'actor_id' => $user->id,
+                    'type' => 'like_post',
                     'notifiable_type' => Post::class,
-                    'notifiable_id'   => $post->id,
-                    'message'         => $user->firstname . ' a aimé votre publication.',
+                    'notifiable_id' => $post->id,
+                    'message' => $user->firstname . ' a aimé votre publication.',
                 ]);
             }
         }
 
         return response()->json([
-            'success'     => true,
-            'liked'       => $liked,
+            'success' => true,
+            'liked' => $liked,
             'likes_count' => $post->fresh()->likes_count,
         ]);
     }
-
-  
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // 7. POSTS D'UN UTILISATEUR (CORRIGÉ)
-    // ────────────────────────────────────────────────────────────────────────────
 
     public function userPosts(Request $request, int $userId): JsonResponse
     {
@@ -589,14 +505,15 @@ class PostController extends Controller
             ->latest()
             ->paginate(12);
 
-        $posts->getCollection()->transform(fn($post) => $this->formatPost($post, $user?->id));
+        $posts->getCollection()->transform(
+            fn($post) => $this->formatPost($post, $user?->id)
+        );
 
-        return response()->json(['success' => true, 'data' => $posts]);
+        return response()->json([
+            'success' => true,
+            'data' => $posts,
+        ]);
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // 8. RÉANALYSER UN POST (Admin ou propriétaire)
-    // ────────────────────────────────────────────────────────────────────────────
 
     public function reanalyze(Request $request, int $id): JsonResponse
     {
@@ -631,13 +548,14 @@ class PostController extends Controller
                 'data' => [
                     'moderation' => [
                         'status' => $moderationResult['status'],
-                        'reason' => $moderationResult['reason'],
-                        'scores' => $moderationResult['scores'],
+                        'reason' => $moderationResult['reason'] ?? null,
+                        'scores' => $moderationResult['scores'] ?? [],
                     ],
                 ],
             ]);
         } catch (\Exception $e) {
             Log::error('Erreur réanalyse: ' . $e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la réanalyse: ' . $e->getMessage(),
@@ -645,40 +563,41 @@ class PostController extends Controller
         }
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // 9. HELPERS
-    // ────────────────────────────────────────────────────────────────────────────
-
     private function formatBytes(int $bytes): string
     {
-        if ($bytes >= 1024 * 1024) return round($bytes / (1024 * 1024), 1) . ' Mo';
-        if ($bytes >= 1024)        return round($bytes / 1024, 1) . ' Ko';
+        if ($bytes >= 1024 * 1024) {
+            return round($bytes / (1024 * 1024), 1) . ' Mo';
+        }
+
+        if ($bytes >= 1024) {
+            return round($bytes / 1024, 1) . ' Ko';
+        }
+
         return $bytes . ' o';
     }
 
     private function formatPost(Post $post, ?int $authUserId): array
     {
         $data = [
-            'id'             => $post->id,
-            'content'        => $post->content,
-            'type'           => $post->type,
-            'media_urls'     => $post->media_urls ?? [],
-            'pdf_files'      => $post->pdf_files  ?? [],
-            'author'         => $this->formatUser($post->author),
-            'shared_post'    => $post->sharedPost
+            'id' => $post->id,
+            'content' => $post->content,
+            'type' => $post->type,
+            'media_urls' => $post->media_urls ?? [],
+            'pdf_files' => $post->pdf_files ?? [],
+            'author' => $this->formatUser($post->author),
+            'shared_post' => $post->sharedPost
                 ? $this->formatPost($post->sharedPost, $authUserId)
                 : null,
-            'likes_count'    => $post->likes_count,
+            'likes_count' => $post->likes_count,
             'comments_count' => $post->comments_count,
-            'shares_count'   => $post->shares_count,
-            'is_liked'       => $authUserId ? $post->isLikedBy($authUserId) : false,
-            'created_at'     => $post->created_at,
-            'updated_at'     => $post->updated_at,
+            'shares_count' => $post->shares_count,
+            'is_liked' => $authUserId ? $post->isLikedBy($authUserId) : false,
+            'created_at' => $post->created_at,
+            'updated_at' => $post->updated_at,
             'moderation_status' => $post->moderation_status,
         ];
 
-        // Les détails de modération sont visibles uniquement par l'auteur
-        if ($authUserId && ($post->user_id === $authUserId)) {
+        if ($authUserId && $post->user_id === $authUserId) {
             $data['moderation'] = [
                 'status' => $post->moderation_status,
                 'reason' => $post->moderation_reason,
@@ -699,22 +618,22 @@ class PostController extends Controller
     {
         if (!$user) {
             return [
-                'id'        => null,
+                'id' => null,
                 'firstname' => 'Utilisateur',
-                'lastname'  => 'supprimé',
-                'avatar'    => null,
-                'headline'  => null,
-                'role'      => null,
+                'lastname' => 'supprimé',
+                'avatar' => null,
+                'headline' => null,
+                'role' => null,
             ];
         }
 
         return [
-            'id'        => $user->id,
+            'id' => $user->id,
             'firstname' => $user->firstname,
-            'lastname'  => $user->lastname,
-            'avatar'    => $user->avatar,
-            'headline'  => $user->profile?->headline,
-            'role'      => $user->role,
+            'lastname' => $user->lastname,
+            'avatar' => $user->avatar,
+            'headline' => $user->profile?->headline,
+            'role' => $user->role,
         ];
     }
 

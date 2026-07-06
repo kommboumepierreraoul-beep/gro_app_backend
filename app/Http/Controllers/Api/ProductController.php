@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 use Illuminate\Support\Facades\Storage;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -32,12 +33,8 @@ class ProductController extends Controller
 
         foreach ($request->file('images') as $image) {
 
-            $path = $image->store(
-                'products',
-                'public'
-            );
-
-            $images[] = asset('storage/' . $path);
+            $images[] = app(CloudinaryService::class)
+                ->uploadImageUrl($image, 'agripulse/products');
         }
     }
 
@@ -132,14 +129,12 @@ public function upload(Request $request)
         'image' => 'required|image|max:10240'
     ]);
 
-    $path = $request->file('image')->store(
-        'products',
-        'public'
-    );
+    $url = app(CloudinaryService::class)
+        ->uploadImageUrl($request->file('image'), 'agripulse/products');
 
     return response()->json([
         'success' => true,
-        'url' => asset('storage/'.$path)
+        'url' => $url,
     ]);
 }
 private function handleImages(Request $request): array
@@ -152,8 +147,8 @@ private function handleImages(Request $request): array
         }
         foreach ($files as $file) {
             if ($file->isValid()) {
-                $path = $file->store('products', 'public');
-                $urls[] = asset('storage/' . $path);
+                $urls[] = app(CloudinaryService::class)
+                    ->uploadImageUrl($file, 'agripulse/products');
             }
         }
     }

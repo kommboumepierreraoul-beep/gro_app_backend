@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Marketplace;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ActivityLog;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -259,8 +260,8 @@ private function handleImages(Request $request): array
 
         foreach ($files as $file) {
             if ($file->isValid()) {
-                $path = $file->store('products', 'public');
-                $urls[] = asset('storage/' . $path);
+                $urls[] = app(CloudinaryService::class)
+                    ->uploadImageUrl($file, 'agripulse/products');
             }
         }
     }

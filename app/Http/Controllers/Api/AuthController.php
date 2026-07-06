@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\ActivityLog;
+use App\Services\CloudinaryService;
 use App\Notifications\EmailVerificationNotification;
 use App\Notifications\ResetPasswordNotification;
 use Illuminate\Auth\Events\Registered;
@@ -277,10 +278,14 @@ class AuthController extends Controller
             if ($request->hasFile('avatar')) {
                 $profile = $user->profile ?? $user->profile()->create([]);
                 if ($profile->avatar) {
-                    Storage::disk('public')->delete($profile->avatar);
+                    app(CloudinaryService::class)->deleteByUrl($profile->avatar);
+                    if (!str_starts_with($profile->avatar, 'http')) {
+                        Storage::disk('public')->delete($profile->avatar);
+                    }
                 }
-                $path = $request->file('avatar')->store('avatars', 'public');
-                $profile->update(['avatar' => $path]);
+                $url = app(CloudinaryService::class)
+                    ->uploadImageUrl($request->file('avatar'), 'agripulse/avatars');
+                $profile->update(['avatar' => $url]);
             }
 
             $user->load('profile');

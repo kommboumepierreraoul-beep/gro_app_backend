@@ -50,4 +50,13 @@ return [
         'public_key' => env('VAPID_PUBLIC_KEY'),
         'private_key' => env('VAPID_PRIVATE_KEY'),
     ],
+    'brevo' => [
+        'key' => env('BREVO_API_KEY'),
+    ],
+    'cloudinary' => [
+        'enabled' => env('CLOUDINARY_ENABLED', true),
+        'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+        'api_key' => env('CLOUDINARY_API_KEY'),
+        'api_secret' => env('CLOUDINARY_API_SECRET'),
+    ],
 ];
