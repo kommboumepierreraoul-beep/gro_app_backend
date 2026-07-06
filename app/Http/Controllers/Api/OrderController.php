@@ -11,6 +11,7 @@ use App\Mail\OrderShippedMail;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\WalletTransaction;
+use App\Services\NotchPayService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -349,55 +350,44 @@ class OrderController extends Controller
 
         try {
 
-            $response = Http::withHeaders([
-
-                "Authorization" => config("notchpay.public_key"),
-
-                "Content-Type"  => "application/json",
-
-                "Accept"        => "application/json",
-
-            ])->post("https://api.notchpay.co/payments", [
-
-                "amount"      => (int) $order->total_amount,
-
-                "currency"    => "XAF",
-
-                "customer"    => [
-
-                    "email" => $user->email,
-
-                    "name"  => $user->name ?? $user->firstname ?? "Client",
-
-                ],
-
-                "reference"   => $order->order_number,
-
-                "callback"    => config("app.url") . "/api/orders/notchpay/webhook",
-
-                "description" => "Paiement commande " . $order->order_number,
-
+            $customerName = trim(($user->firstname ?? '') . ' ' . ($user->lastname ?? ''));
+            $response = app(NotchPayService::class)->initiatePayment([
+                'amount' => $order->total_amount,
+                'currency' => 'XAF',
+                'customer_email' => $user->email,
+                'customer_name' => $customerName ?: ($user->name ?? 'Client'),
+                'customer_phone' => $user->phone ?? '',
+                'reference' => $order->order_number,
+                'callback_url' => config('app.url') . '/api/webhooks/notchpay',
+                'return_url' => env('FRONTEND_URL', 'http://localhost:3000') . '/orders?payment_status=pending&reference=' . $order->order_number,
+                'description' => 'Paiement commande ' . $order->order_number,
             ]);
 
 
 
-            $data = $response->json();
+            $data = $response;
 
             Log::info("NotchPay response", ["data" => $data]);
 
 
 
+            if (($data['error'] ?? false) === true) {
+                return response()->json(["success" => false, "message" => $data['message'] ?? "Erreur NotchPay"], 502);
+            }
+
             $authUrl = $data["authorization_url"] ?? $data["redirect_url"] ?? null;
 
             if (!$authUrl) {
 
-                return response()->json(["success" => false, "message" => "Erreur NotchPay", "debug" => $data], 500);
+                return response()->json(["success" => false, "message" => "Aucune URL de paiement recue", "debug" => $data], 502);
 
             }
 
 
 
-            $order->payment_reference = $data["reference"] ?? $data["id"] ?? null;
+            $order->payment_reference = $data["reference"] ?? $data["id"] ?? $order->order_number;
+            $order->payment_method = 'notchpay';
+            $order->payment_status = 'pending';
 
             $order->save();
 
@@ -434,20 +424,44 @@ class OrderController extends Controller
         }
 
         try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Authorization' => config('services.notchpay.public_key'),
-                'Accept'        => 'application/json',
-            ])->get('https://api.notchpay.co/payments/' . $reference);
+            $notchPay = app(NotchPayService::class);
+            $data = $notchPay->verifyPayment($reference);
 
-            $data = $response->json();
-            $status = $data['transaction']['status'] ?? null;
-            $merchantRef = $data['transaction']['merchant_reference'] ?? null;
+            if (($data['error'] ?? false) === true) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $data['message'] ?? 'Verification NotchPay impossible',
+                ], 502);
+            }
 
-            if ($status === 'complete' && $merchantRef) {
-                $order = Order::where('order_number', $merchantRef)->where('status', 'pending')->first();
+            $status = $data['status'] ?? null;
+            $transaction = $data['transaction'] ?? [];
+            $merchantRef = $data['merchant_reference']
+                ?? $transaction['merchant_reference']
+                ?? $transaction['reference']
+                ?? $reference;
+
+            if ($notchPay->isSuccessfulStatus($status) && $merchantRef) {
+                $order = Order::where(function ($query) use ($merchantRef) {
+                    $query->where('order_number', $merchantRef)
+                        ->orWhere('payment_reference', $merchantRef);
+                })->where('status', 'pending')->first();
                 if ($order) {
-                    $order->status = 'paid';
-                    $order->save();
+                    DB::transaction(function () use ($order, $data, $merchantRef) {
+                        $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->first();
+
+                        if (!$lockedOrder || $lockedOrder->status !== 'pending') {
+                            return;
+                        }
+
+                        $lockedOrder->status = 'paid';
+                        $lockedOrder->payment_status = 'completed';
+                        $lockedOrder->payment_method = 'notchpay';
+                        $lockedOrder->payment_reference = $data['reference'] ?? $merchantRef;
+                        $lockedOrder->save();
+
+                        event(new OrderPaid($lockedOrder));
+                    });
 
                     // Emails
                     try {

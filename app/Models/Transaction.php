@@ -27,6 +27,7 @@ class Transaction extends Model
         'amount' => 'decimal:2',
         'balance_before' => 'decimal:2',
         'balance_after' => 'decimal:2',
+        'metadata' => 'array',
     ];
 
     public function wallet()

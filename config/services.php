@@ -20,6 +20,10 @@ return [
     'notchpay' => [
         'api_key' => env('NOTCHPAY_API_KEY'),
         'api_secret' => env('NOTCHPAY_API_SECRET'),
+        'public_key' => env('NOTCHPAY_PUBLIC_KEY', env('NOTCHPAY_API_KEY')),
+        'secret_key' => env('NOTCHPAY_SECRET_KEY', env('NOTCHPAY_API_SECRET')),
+        'endpoint' => env('NOTCHPAY_ENDPOINT', 'https://api.notchpay.co'),
+        'webhook_hash' => env('NOTCHPAY_WEBHOOK_HASH'),
     ],
     'monetbil' => [
         'service_key' => env('MONETBIL_SERVICE_KEY'),

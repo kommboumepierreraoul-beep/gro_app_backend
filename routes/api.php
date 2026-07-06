@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Api\{
     CategoryController,
+    NotchpayWebhookController,
     ProductReviewController,
     OrderController,
     WishlistController,
@@ -33,8 +34,8 @@ Route::get('/tracking/{orderNumber}', [OrderController::class, 'getTrackingData'
 // =====================================================
 // WEBHOOKS (sans auth)
 // =====================================================
-Route::match(['get', 'post'], '/webhooks/notchpay', [OrderController::class, 'handleNotchPayWebhook']);
-Route::match(['get', 'post'], '/orders/notchpay/webhook', [OrderController::class, 'handleNotchPayWebhook']);
+Route::match(['get', 'post'], '/webhooks/notchpay', [NotchpayWebhookController::class, 'handle']);
+Route::match(['get', 'post'], '/orders/notchpay/webhook', [NotchpayWebhookController::class, 'handle']);
 Route::post('/verify-payment', [OrderController::class, 'verifyAndConfirmPayment']);
 Route::match(['get', 'post'], '/wallet/deposit/callback', [WalletController::class, 'depositCallback']);
 

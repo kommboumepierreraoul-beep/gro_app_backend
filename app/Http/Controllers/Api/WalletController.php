@@ -83,6 +83,9 @@ class WalletController extends Controller
             return $pinResponse;
         }
 
+        $this->reconcilePendingDeposits($wallet);
+        $wallet->refresh();
+
         return response()->json([
             'balance' => $wallet->balance,
             'total_credited' => $wallet->total_credited,
@@ -128,7 +131,7 @@ class WalletController extends Controller
                 'customer_name' => $user->firstname . ' ' . $user->lastname,
                 'customer_phone' => $user->phone ?? '',
                 'reference' => $reference,
-                'callback_url' => env('NOTCHPAY_CALLBACK_URL', config('app.url') . '/api/wallet/deposit/callback'),
+                'callback_url' => env('NOTCHPAY_CALLBACK_URL', config('app.url') . '/api/webhooks/notchpay'),
                 'return_url' => env('FRONTEND_URL', 'http://localhost:3000') . '/wallet',
             ]);
 
@@ -162,7 +165,11 @@ class WalletController extends Controller
                 'description' => 'Depot via NotchPay',
                 'status' => 'pending',
                 'reference' => $reference,
-                'external_reference' => $response['transaction']['reference'] ?? null,
+                'external_reference' => $response['provider_reference']
+                    ?? $response['transaction']['id']
+                    ?? $response['id']
+                    ?? $response['transaction']['reference']
+                    ?? null,
             ]);
 
             return response()->json([
@@ -209,7 +216,7 @@ class WalletController extends Controller
             $notchpay = app(NotchPayService::class);
             $response = $notchpay->verifyPayment($reference);
 
-            if (($response['status'] ?? null) === 'completed') {
+            if ($notchpay->isSuccessfulStatus($response['status'] ?? null)) {
                 $wallet = Wallet::find($transaction->wallet_id);
                 if ($wallet) {
                     $balanceBefore = $wallet->balance;
@@ -219,6 +226,8 @@ class WalletController extends Controller
                     $transaction->balance_before = $balanceBefore;
                     $transaction->balance_after = $wallet->balance;
                     $transaction->status = 'completed';
+                    $transaction->external_reference = $response['transaction']['reference'] ?? $response['reference'] ?? $transaction->external_reference;
+                    $transaction->metadata = $response;
                     $transaction->save();
                 }
             }
@@ -235,29 +244,100 @@ class WalletController extends Controller
 
     public function callback(Request $request)
     {
-        Log::info('NotchPay wallet webhook received', $request->all());
+        if ($request->isMethod('get')) {
+            $depositReference = $request->query('trxref', $request->query('notchpay_trxref', $request->query('reference', '')));
+            $providerReference = $request->query('reference', $request->query('notchpay_trxref', $depositReference));
+            $status = (string) $request->query('status', 'pending');
 
-        $reference = $request->input('reference');
-        $status = $request->input('status');
-
-        if ($reference && $status === 'completed') {
-            $transaction = Transaction::where('reference', $reference)->first();
-            if ($transaction && $transaction->status === 'pending') {
-                $wallet = Wallet::find($transaction->wallet_id);
-                if ($wallet) {
-                    $balanceBefore = $wallet->balance;
-                    $wallet->balance += $transaction->amount;
-                    $wallet->save();
-
-                    $transaction->balance_before = $balanceBefore;
-                    $transaction->balance_after = $wallet->balance;
-                    $transaction->status = 'completed';
-                    $transaction->save();
-                }
+            if ($depositReference && app(NotchPayService::class)->isSuccessfulStatus($status)) {
+                $this->confirmReturnedDeposit((string) $depositReference, (string) $providerReference, $request->query());
             }
+
+            $frontendUrl = rtrim((string) env('FRONTEND_URL', 'http://localhost:3000'), '/');
+
+            return redirect()->away($frontendUrl . '/wallet?payment_status=' . urlencode($status) . '&reference=' . urlencode((string) $depositReference));
         }
 
-        return response()->json(['success' => true]);
+        return app(NotchpayWebhookController::class)->handle($request);
+    }
+
+    private function confirmReturnedDeposit(string $depositReference, string $providerReference, array $payload): void
+    {
+        $verification = app(NotchPayService::class)->verifyPayment($providerReference ?: $depositReference);
+
+        if (($verification['error'] ?? false) === true || !app(NotchPayService::class)->isSuccessfulStatus($verification['status'] ?? null)) {
+            Log::warning('NotchPay return verification failed', [
+                'deposit_reference' => $depositReference,
+                'provider_reference' => $providerReference,
+                'verification' => $verification,
+            ]);
+            return;
+        }
+
+        DB::transaction(function () use ($depositReference, $providerReference, $payload, $verification) {
+            $transaction = Transaction::where('reference', $depositReference)
+                ->orWhere('external_reference', $depositReference)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$transaction || $transaction->status !== 'pending') {
+                return;
+            }
+
+            $wallet = Wallet::whereKey($transaction->wallet_id)->lockForUpdate()->first();
+
+            if (!$wallet) {
+                Log::error('Wallet deposit return without wallet', [
+                    'transaction_id' => $transaction->id,
+                    'reference' => $depositReference,
+                ]);
+                return;
+            }
+
+            $balanceBefore = (float) $wallet->balance;
+            $wallet->balance = $balanceBefore + (float) $transaction->amount;
+            $wallet->total_credited = (float) $wallet->total_credited + (float) $transaction->amount;
+            $wallet->save();
+
+            $metadata = is_array($transaction->metadata) ? $transaction->metadata : [];
+            $transaction->update([
+                'status' => 'completed',
+                'balance_before' => $balanceBefore,
+                'balance_after' => $wallet->balance,
+                'external_reference' => $providerReference ?: $transaction->external_reference,
+                'metadata' => array_merge($metadata, [
+                    'notchpay_return' => $payload,
+                    'notchpay_verification' => $verification,
+                    'processed_at' => now()->toISOString(),
+                ]),
+            ]);
+
+            Log::info('Wallet credited via NotchPay return', [
+                'transaction_id' => $transaction->id,
+                'user_id' => $transaction->user_id,
+                'amount' => $transaction->amount,
+                'reference' => $depositReference,
+            ]);
+        });
+    }
+
+    private function reconcilePendingDeposits(Wallet $wallet): void
+    {
+        Transaction::where('wallet_id', $wallet->id)
+            ->where('type', 'deposit')
+            ->where('status', 'pending')
+            ->latest()
+            ->limit(10)
+            ->get()
+            ->each(function (Transaction $transaction) {
+                $providerReference = $transaction->external_reference ?: $transaction->reference;
+
+                $this->confirmReturnedDeposit(
+                    $transaction->reference,
+                    $providerReference,
+                    ['source' => 'wallet_reconcile']
+                );
+            });
     }
 
     public function depositCallback(Request $request)
@@ -272,6 +352,8 @@ class WalletController extends Controller
         if (!$wallet) {
             return response()->json(['data' => []]);
         }
+
+        $this->reconcilePendingDeposits($wallet);
 
         $transactions = Transaction::where('wallet_id', $wallet->id)
             ->orderBy('created_at', 'desc')
