@@ -3,10 +3,10 @@ FROM php:8.4-apache
 RUN apt-get update && apt-get install -y \
     git unzip zip curl \
     libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
-    libonig-dev libxml2-dev libzip-dev libpq-dev \
+    libonig-dev libxml2-dev libzip-dev libpq-dev libgmp-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install \
-        pdo pdo_pgsql pgsql mbstring bcmath gd zip opcache \
+        pdo pdo_pgsql pgsql mbstring bcmath gd zip opcache gmp \
     && rm -rf /var/lib/apt/lists/*
 
 RUN a2enmod rewrite
@@ -23,7 +23,6 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# ✅ IMPORTANT FIX
 COPY . .
 
 RUN composer install \
