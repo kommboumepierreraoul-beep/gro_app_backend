@@ -102,16 +102,42 @@ class ConversationService
      * Retourne les messages formattés pour l'API DeepSeek/OpenAI,
      * avec le system prompt en tête.
      */
-    public function buildApiMessages(AiConversation $conversation, ?string $systemPrompt = null): array
+    public function buildApiMessages(
+        AiConversation $conversation,
+        ?string $systemPrompt = null,
+        ?array $contextData = null
+    ): array
     {
         $messages = [];
 
         if ($systemPrompt) {
-            $messages[] = ['role' => 'system', 'content' => $systemPrompt];
+            $messages[] = [
+                'role' => 'system',
+                'content' => $this->withQualityPrompt($systemPrompt),
+            ];
+        }
+
+        if (!empty($contextData)) {
+            $messages[] = [
+                'role' => 'system',
+                'content' => "Contexte métier disponible. Utilise ces informations uniquement si elles sont utiles à la réponse, sans inventer de détails absents :\n\n" .
+                    json_encode($contextData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ];
         }
 
         $history = $conversation->toApiMessages(self::CONTEXT_WINDOW);
         return array_merge($messages, $history);
+    }
+
+    private function withQualityPrompt(string $systemPrompt): string
+    {
+        $qualityPrompt = (string) config('ai.system_prompts.quality', '');
+
+        if ($qualityPrompt === '' || str_contains($systemPrompt, $qualityPrompt)) {
+            return $systemPrompt;
+        }
+
+        return trim($systemPrompt) . "\n\n" . trim($qualityPrompt);
     }
 
     // ── Historique paginé ──────────────────────────────────────────────────────
@@ -122,5 +148,26 @@ class ConversationService
             ->withCount('messages')
             ->latest()
             ->paginate($perPage);
+    }
+
+    public function getConversation(int $userId, string $conversationId): ?AiConversation
+    {
+        return AiConversation::where('user_id', $userId)
+            ->where('id', $conversationId)
+            ->with('messages')
+            ->first();
+    }
+
+    public function deleteConversation(int $userId, string $conversationId): bool
+    {
+        $conversation = AiConversation::where('user_id', $userId)
+            ->where('id', $conversationId)
+            ->first();
+
+        if (!$conversation) {
+            return false;
+        }
+
+        return (bool) $conversation->delete();
     }
 }

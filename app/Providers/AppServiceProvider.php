@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ServiceProvider;
 use App\Models\Order;
 use App\Policies\OrderPolicy;
+use Illuminate\Support\Facades\URL;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -87,6 +88,10 @@ class AppServiceProvider extends ServiceProvider
                 // 'message' => \App\Models\Message::class,
                 // 'user' => \App\Models\User::class,
             ];
+
+            if (app()->environment('production')) {
+                URL::forceScheme('https');
+            }
 
             $model = $modelMap[$contextType] ?? null;
 

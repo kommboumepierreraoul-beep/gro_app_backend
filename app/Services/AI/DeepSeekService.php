@@ -47,6 +47,14 @@ class DeepSeekService
             ], $options));
 
             if ($response->failed()) {
+                $errorMessage = $response->json('error.message') ?? $response->json('error') ?? $response->body();
+
+                if ($response->status() === 429) {
+                    $errorMessage = 'Quota ou limite de requêtes IA atteint.';
+                } elseif ($response->status() === 401) {
+                    $errorMessage = 'Clé API IA invalide ou non autorisée.';
+                }
+
                 Log::error('AI Request Failed', [
                     'status' => $response->status(),
                     'body' => $response->body(),
@@ -54,17 +62,20 @@ class DeepSeekService
 
                 return [
                     'success' => false,
-                    'error' => $response->json('error.message') ?? $response->body(),
+                    'error' => $errorMessage,
                     'code' => $response->status(),
                 ];
             }
 
             $data = $response->json();
 
+            $content = $this->normalizeGeneratedContent($data['choices'][0]['message']['content'] ?? '');
+
             return [
                 'success' => true,
-                'content' => $data['choices'][0]['message']['content'] ?? '',
+                'content' => $content,
                 'tokens' => $data['usage']['total_tokens'] ?? 0,
+                'usage' => $data['usage'] ?? ['total_tokens' => 0],
                 'finish_reason' => $data['choices'][0]['finish_reason'] ?? 'stop',
                 'model' => $data['model'] ?? $this->model,
             ];
@@ -269,6 +280,19 @@ PROMPT;
         ];
     }
 
+    public function moderateContent(string $content): array
+    {
+        $result = $this->moderate($content);
+
+        return [
+            'is_safe' => !($result['flagged'] ?? false),
+            'score' => (float) ($result['confidence'] ?? 0.0),
+            'categories' => (array) ($result['reasons'] ?? []),
+            'reason' => implode(', ', (array) ($result['reasons'] ?? [])),
+            'raw' => $result,
+        ];
+    }
+
     public function generateTags(string $content, int $max = 5): array
     {
         $sanitizedContent = $this->plainTextForPrompt($content);
@@ -313,6 +337,19 @@ PROMPT;
         );
 
         return $result['content'] ?? '';
+    }
+
+    public function summarizeThread(array $messages, string $language = 'fr'): string
+    {
+        if (count($messages) < 2) {
+            return 'Pas assez de messages pour générer un résumé.';
+        }
+
+        $content = collect($messages)
+            ->map(fn (array $message) => ($message['author'] ?? 'Utilisateur') . ': ' . ($message['content'] ?? ''))
+            ->implode("\n");
+
+        return $this->summarize($content, $language);
     }
 
     public function improvePost(string $content, string $language = 'fr'): string
@@ -387,5 +424,39 @@ PROMPT;
     private function plainTextForPrompt(string $content): string
     {
         return trim(html_entity_decode(strip_tags($content), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    }
+
+    private function normalizeGeneratedContent(string $content): string
+    {
+        $replacements = [
+            'Ã©' => 'é',
+            'Ã¨' => 'è',
+            'Ãª' => 'ê',
+            'Ã«' => 'ë',
+            'Ã ' => 'à',
+            'Ã¢' => 'â',
+            'Ã¤' => 'ä',
+            'Ã®' => 'î',
+            'Ã¯' => 'ï',
+            'Ã´' => 'ô',
+            'Ã¶' => 'ö',
+            'Ã¹' => 'ù',
+            'Ã»' => 'û',
+            'Ã¼' => 'ü',
+            'Ã§' => 'ç',
+            'Ã‰' => 'É',
+            'Ã€' => 'À',
+            'Ã‡' => 'Ç',
+            'â€™' => "'",
+            'â€œ' => '"',
+            'â€' => '"',
+            'â€“' => '-',
+            'â€”' => '-',
+            'â€¦' => '...',
+            'Â ' => ' ',
+            'Â·' => '-',
+        ];
+
+        return trim(strtr($content, $replacements));
     }
 }
