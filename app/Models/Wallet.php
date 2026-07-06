@@ -15,12 +15,19 @@ class Wallet extends Model
         'total_credited',
         'total_debited',
         'currency',
+        'pin_hash',
+        'pin_set_at',
     ];
 
     protected $casts = [
         'balance'        => 'decimal:2',
         'total_credited' => 'decimal:2',
         'total_debited'  => 'decimal:2',
+        'pin_set_at'     => 'datetime',
+    ];
+
+    protected $hidden = [
+        'pin_hash',
     ];
 
     public function user()

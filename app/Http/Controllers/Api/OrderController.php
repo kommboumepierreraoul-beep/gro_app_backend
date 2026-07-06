@@ -13,6 +13,7 @@ use App\Models\OrderItem;
 use App\Models\WalletTransaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -266,6 +267,10 @@ class OrderController extends Controller
     // ==================== PAIEMENT AVEC WALLET ====================
     public function payWithWallet(Order $order, Request $request)
     {
+        $request->validate([
+            'pin' => ['required', 'digits:4'],
+        ]);
+
         $user = $request->user();
         if ($order->user_id !== $user->id) {
             return response()->json(['success' => false, 'message' => 'Non autorisé'], 403);
@@ -277,6 +282,17 @@ class OrderController extends Controller
         $wallet = $user->wallet;
         if (!$wallet || $wallet->balance < $order->total_amount) {
             return response()->json(['success' => false, 'message' => 'Solde insuffisant'], 422);
+        }
+        if (!$wallet->pin_hash) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Veuillez configurer votre PIN wallet',
+                'pin_required' => true,
+                'setup_required' => true,
+            ], 428);
+        }
+        if (!Hash::check((string) $request->pin, $wallet->pin_hash)) {
+            return response()->json(['success' => false, 'message' => 'PIN wallet incorrect'], 403);
         }
 
         DB::transaction(function () use ($order, $wallet) {

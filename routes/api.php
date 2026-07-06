@@ -56,6 +56,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // WALLET
     Route::prefix('wallet')->group(function () {
+        Route::get('/security', [WalletController::class, 'securityStatus']);
+        Route::post('/pin', [WalletController::class, 'setupPin']);
         Route::get('/balance', [WalletController::class, 'balance']);
         Route::post('/deposit', [WalletController::class, 'deposit']);
         Route::post('/withdraw', [WalletController::class, 'withdraw']);
