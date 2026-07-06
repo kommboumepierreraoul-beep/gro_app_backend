@@ -5,7 +5,6 @@ namespace App\Services\AI;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DeepSeekService
 {
@@ -32,10 +31,6 @@ class DeepSeekService
             ->retry(2, 500);
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // 1. CHAT DIRECT
-    // ──────────────────────────────────────────────────────────────────────────
-
     public function chat(array $messages, array $options = []): array
     {
         try {
@@ -47,7 +42,7 @@ class DeepSeekService
             $response = $this->client->post('/chat/completions', array_merge([
                 'model' => $this->model,
                 'messages' => $messages,
-                'temperature' => 0.7,
+                'temperature' => (float) config('ai.temperature', 0.35),
                 'max_tokens' => 1024,
             ], $options));
 
@@ -87,30 +82,17 @@ class DeepSeekService
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // 2. CHAT AVEC SYSTEM PROMPT
-    // ──────────────────────────────────────────────────────────────────────────
-
     public function chatWithSystem(array $messages, ?string $systemPrompt = null, array $options = []): array
     {
-        $fullMessages = [];
+        $fullMessages = [[
+            'role' => 'system',
+            'content' => $this->withQualityPrompt(
+                $systemPrompt ?: config('ai.system_prompts.chat') ?: $this->getDefaultSystemPrompt()
+            ),
+        ]];
 
-        if ($systemPrompt) {
-            $fullMessages[] = ['role' => 'system', 'content' => $systemPrompt];
-        } elseif (config('ai.system_prompts.chat')) {
-            $fullMessages[] = ['role' => 'system', 'content' => config('ai.system_prompts.chat')];
-        } else {
-            $fullMessages[] = ['role' => 'system', 'content' => $this->getDefaultSystemPrompt()];
-        }
-
-        $fullMessages = array_merge($fullMessages, $messages);
-
-        return $this->chat($fullMessages, $options);
+        return $this->chat(array_merge($fullMessages, $messages), $options);
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // 3. STREAMING SSE (CORRIGÉ - Version qui fonctionne)
-    // ──────────────────────────────────────────────────────────────────────────
 
     public function streamChatOutput(array $messages, callable $callback): void
     {
@@ -126,7 +108,7 @@ class DeepSeekService
                     'model' => $this->model,
                     'messages' => $messages,
                     'max_tokens' => 1024,
-                    'temperature' => 0.7,
+                    'temperature' => (float) config('ai.temperature', 0.35),
                     'stream' => true,
                 ]);
 
@@ -146,6 +128,7 @@ class DeepSeekService
             }
 
             $body = $response->toPsrResponse()->getBody();
+            $buffer = '';
             $tokenCount = 0;
 
             while (!$body->eof()) {
@@ -156,20 +139,18 @@ class DeepSeekService
 
                 $chunk = $body->read(1024);
 
-                if (empty($chunk)) {
+                if ($chunk === '') {
                     continue;
                 }
 
-                $lines = explode("\n", $chunk);
+                $buffer .= $chunk;
+                $lines = explode("\n", $buffer);
+                $buffer = array_pop($lines) ?? '';
 
                 foreach ($lines as $line) {
                     $line = trim($line);
 
-                    if (empty($line)) {
-                        continue;
-                    }
-
-                    if (!str_starts_with($line, 'data:')) {
+                    if ($line === '' || !str_starts_with($line, 'data:')) {
                         continue;
                     }
 
@@ -218,49 +199,36 @@ class DeepSeekService
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // 4. STREAMING AVEC SYSTEM PROMPT
-    // ──────────────────────────────────────────────────────────────────────────
-
     public function streamChatWithSystem(array $messages, ?string $systemPrompt = null, callable $callback): void
     {
-        $fullMessages = [];
+        $fullMessages = [[
+            'role' => 'system',
+            'content' => $this->withQualityPrompt(
+                $systemPrompt ?: config('ai.system_prompts.chat') ?: $this->getDefaultSystemPrompt()
+            ),
+        ]];
 
-        if ($systemPrompt) {
-            $fullMessages[] = ['role' => 'system', 'content' => $systemPrompt];
-        } elseif (config('ai.system_prompts.chat')) {
-            $fullMessages[] = ['role' => 'system', 'content' => config('ai.system_prompts.chat')];
-        } else {
-            $fullMessages[] = ['role' => 'system', 'content' => $this->getDefaultSystemPrompt()];
-        }
-
-        $fullMessages = array_merge($fullMessages, $messages);
-
-        $this->streamChatOutput($fullMessages, $callback);
+        $this->streamChatOutput(array_merge($fullMessages, $messages), $callback);
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // 5. MODÉRATION
-    // ──────────────────────────────────────────────────────────────────────────
 
     public function moderate(string $content): array
     {
-        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+        $sanitizedContent = $this->plainTextForPrompt($content);
 
         $prompt = <<<PROMPT
-Analyse ce contenu pour détecter: spam, discours haineux, violence, contenu adulte, désinformation.
+Analyse ce contenu pour détecter : spam, discours haineux, violence, contenu adulte, arnaque ou désinformation.
 
 <content_to_analyze>
 {$sanitizedContent}
 </content_to_analyze>
 
-Réponds UNIQUEMENT en JSON valide avec le format:
+Réponds UNIQUEMENT en JSON valide avec le format :
 {"flagged": bool, "confidence": float, "reasons": ["raison1", ...]}
 PROMPT;
 
-        $result = $this->chat([
+        $result = $this->chatWithSystem([
             ['role' => 'user', 'content' => $prompt],
-        ], ['temperature' => 0.1, 'max_tokens' => 256]);
+        ], config('ai.system_prompts.moderate'), ['temperature' => 0.1, 'max_tokens' => 256]);
 
         if (!($result['success'] ?? false)) {
             Log::error('Moderation API failed', ['error' => $result['error'] ?? 'Unknown']);
@@ -301,13 +269,9 @@ PROMPT;
         ];
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // 6. TAGS
-    // ──────────────────────────────────────────────────────────────────────────
-
     public function generateTags(string $content, int $max = 5): array
     {
-        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+        $sanitizedContent = $this->plainTextForPrompt($content);
 
         $prompt = <<<PROMPT
 Génère exactement {$max} tags pertinents pour ce contenu.
@@ -316,12 +280,12 @@ Génère exactement {$max} tags pertinents pour ce contenu.
 {$sanitizedContent}
 </content_to_analyze>
 
-Réponds UNIQUEMENT en JSON: {"tags": ["tag1", "tag2", ...]}
+Réponds UNIQUEMENT en JSON valide : {"tags": ["tag1", "tag2", ...]}
 PROMPT;
 
-        $result = $this->chat([
+        $result = $this->chatWithSystem([
             ['role' => 'user', 'content' => $prompt],
-        ], ['temperature' => 0.3, 'max_tokens' => 128]);
+        ], null, ['temperature' => 0.2, 'max_tokens' => 128]);
 
         if (!($result['success'] ?? false)) {
             Log::error('Tag generation failed', ['error' => $result['error'] ?? 'Unknown']);
@@ -329,36 +293,27 @@ PROMPT;
         }
 
         $json = json_decode($result['content'], true);
-        return $json['tags'] ?? [];
+        return is_array($json['tags'] ?? null) ? $json['tags'] : [];
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // 7. RÉSUMÉ
-    // ──────────────────────────────────────────────────────────────────────────
 
     public function summarize(string $content, string $language = 'fr'): string
     {
-        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
-
+        $sanitizedContent = $this->plainTextForPrompt($content);
         $systemPrompt = config(
             'ai.system_prompts.summarize',
-            "Tu es un assistant qui résume des discussions. Réponds en {$language}. Sois concis (3-5 phrases max)."
+            "Tu es un assistant qui résume des discussions. Réponds en {$language}. Sois concis (3-5 phrases maximum)."
         );
 
         $result = $this->chatWithSystem(
             [
-                ['role' => 'user', 'content' => "Résume cette discussion:\n\n{$sanitizedContent}"],
+                ['role' => 'user', 'content' => "Résume cette discussion :\n\n{$sanitizedContent}"],
             ],
-            $systemPrompt,
-            ['temperature' => 0.4, 'max_tokens' => 256]
+            "{$systemPrompt}\nRéponds en {$language}.",
+            ['temperature' => 0.2, 'max_tokens' => 256]
         );
 
         return $result['content'] ?? '';
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // 8. AMÉLIORATION DE TEXTE
-    // ──────────────────────────────────────────────────────────────────────────
 
     public function improvePost(string $content, string $language = 'fr'): string
     {
@@ -367,43 +322,23 @@ PROMPT;
             "Améliore le texte suivant en corrigeant les fautes et en le rendant plus clair. Réponds en {$language}."
         );
 
-        $sanitizedContent = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
+        $sanitizedContent = $this->plainTextForPrompt($content);
 
         $result = $this->chatWithSystem(
             [
                 ['role' => 'user', 'content' => $sanitizedContent],
             ],
-            $systemPrompt,
-            ['temperature' => 0.5, 'max_tokens' => 512]
+            "{$systemPrompt}\nRéponds en {$language}.",
+            ['temperature' => 0.2, 'max_tokens' => 512]
         );
 
         return $result['content'] ?? '';
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // 9. SYSTEM PROMPT PAR DÉFAUT
-    // ──────────────────────────────────────────────────────────────────────────
-
     private function getDefaultSystemPrompt(): string
     {
-        return config(
-            'ai.system_prompts.chat',
-            "Tu es AgriPulse AI, l'assistant intelligent de la plateforme communautaire agricole AgriPulse.
-
-Ta mission est d'aider les agriculteurs, éleveurs, techniciens agricoles et membres de la communauté.
-
-Règles :
-1. Utilise les informations du contexte pour répondre
-2. Sois courtois, professionnel et empathique
-3. Si tu ne sais pas, dis-le honnêtement
-4. Ne donne pas de conseils médicaux vétérinaires sans mentionner la consultation d'un professionnel
-5. Structure ta réponse de manière claire et organisée"
-        );
+        return config('ai.system_prompts.chat', "Tu es AgriPulse IA, l'assistant intelligent de la plateforme agricole AgriPulse.");
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // 10. HEALTH CHECK
-    // ──────────────────────────────────────────────────────────────────────────
 
     public function healthCheck(): array
     {
@@ -431,14 +366,26 @@ Règles :
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // 11. ESTIMATION DE TOKENS
-    // ──────────────────────────────────────────────────────────────────────────
-
     public function estimateTokens(string $text): int
     {
         $wordCount = str_word_count($text, 0, 'àâäéèêëîïôöûüÿçÀÂÄÉÈÊËÎÏÔÖÛÜŸÇ');
         $charCount = mb_strlen($text);
         return max(1, (int) ceil(max($charCount / 4, $wordCount * 0.75)));
+    }
+
+    private function withQualityPrompt(string $systemPrompt): string
+    {
+        $qualityPrompt = (string) config('ai.system_prompts.quality', '');
+
+        if ($qualityPrompt === '' || str_contains($systemPrompt, $qualityPrompt)) {
+            return $systemPrompt;
+        }
+
+        return trim($systemPrompt) . "\n\n" . trim($qualityPrompt);
+    }
+
+    private function plainTextForPrompt(string $content): string
+    {
+        return trim(html_entity_decode(strip_tags($content), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
     }
 }

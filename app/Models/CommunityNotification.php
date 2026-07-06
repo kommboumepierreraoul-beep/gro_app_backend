@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Services\PushNotificationService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 /**
  * @property int $id
@@ -42,6 +44,8 @@ class CommunityNotification extends Model
         'user_id',
         'actor_id',
         'type',
+        'notifiable_type',
+        'notifiable_id',
         'message',
         'data',
         'is_read',
@@ -103,5 +107,42 @@ class CommunityNotification extends Model
                 ->orWhere('type', 'mention')
                 ->orWhere('type', 'announcement');
         });
+    }
+
+    protected static function booted(): void
+    {
+        static::created(function (CommunityNotification $notification) {
+            try {
+                $user = $notification->user;
+                if (!$user) {
+                    return;
+                }
+
+                app(PushNotificationService::class)->sendToUser(
+                    $user,
+                    'AgriPulse',
+                    $notification->message,
+                    $notification->pushUrl()
+                );
+            } catch (\Throwable $error) {
+                Log::warning('Community notification push failed', [
+                    'notification_id' => $notification->id,
+                    'error' => $error->getMessage(),
+                ]);
+            }
+        });
+    }
+
+    private function pushUrl(): string
+    {
+        if (!empty($this->data['url'])) {
+            return (string) $this->data['url'];
+        }
+
+        if (str_starts_with($this->type, 'mission_') || $this->type === 'review_request') {
+            return '/missions/notification';
+        }
+
+        return '/notifications';
     }
 }

@@ -10,12 +10,13 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "deepseek-php/deepseek-php-client": "^2.1",
+        "intervention/image": "^4.1",
         "laravel/framework": "^13.8",
         "laravel/sanctum": "^4.2",
         "laravel/socialite": "^5.27",
         "laravel/tinker": "^3.0",
-        "deepseek-php/deepseek-php-client": "^2.1",
-        "intervention/image": "^4.1",
+        "minishlink/web-push": "*",
         "openai-php/client": "^0.19.2",
         "predis/predis": "^3.5"
     },

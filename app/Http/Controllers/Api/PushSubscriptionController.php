@@ -39,6 +39,12 @@ class PushSubscriptionController extends Controller
     // Clé publique VAPID pour le frontend
     public function vapidKey()
     {
+        if (!config('services.vapid.public_key')) {
+            return response()->json([
+                'message' => 'Cle publique VAPID non configuree',
+            ], 503);
+        }
+
         return response()->json([
             'public_key' => config('services.vapid.public_key'),
         ]);

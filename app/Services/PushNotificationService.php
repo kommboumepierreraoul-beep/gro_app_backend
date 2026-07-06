@@ -14,6 +14,10 @@ class PushNotificationService
 
     public function __construct()
     {
+        if (!class_exists(WebPush::class)) {
+            return;
+        }
+
         $this->webPush = new WebPush([
             'VAPID' => [
                 'subject'    => config('services.vapid.subject'),
@@ -25,6 +29,11 @@ class PushNotificationService
 
     public function sendToUser(User $user, string $title, string $message, string $url = '/'): void
     {
+        if (!isset($this->webPush)) {
+            Log::warning('Push notifications skipped: minishlink/web-push is not installed.');
+            return;
+        }
+
         $subscriptions = PushSubscription::where('user_id', $user->id)->get();
 
         if ($subscriptions->isEmpty()) return;
