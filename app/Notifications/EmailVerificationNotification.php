@@ -2,38 +2,80 @@
 
 namespace App\Notifications;
 
+use App\Services\BrevoMailService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
 class EmailVerificationNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(private readonly string $code) {}
+    public function __construct(
+        private readonly string $code
+    ) {}
 
     public function via(object $notifiable): array
     {
-        return ['mail'];
+        return [];
     }
 
-    public function toMail(object $notifiable): MailMessage
+    public function sendWithBrevo(object $notifiable): void
     {
-        return (new MailMessage)
-            ->subject('Verify Your Email Address')
-            ->greeting('Hello ' . $notifiable->firstname . '!')
-            ->line('Use the verification code below to confirm your email address.')
-            ->line('This code is valid for **10 minutes**.')
-            ->line('')
-            ->line('## ' . $this->code)
-            ->line('')
-            ->line('If you did not create an account, no further action is required.')
-            ->salutation('Regards, ' . config('app.name'));
+        $firstname = $notifiable->firstname ?? 'Utilisateur';
+
+        $html = "
+            <div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto;'>
+                <h2 style='color: #16a34a;'>AgriPulse</h2>
+
+                <p>Bonjour <strong>{$firstname}</strong>,</p>
+
+                <p>
+                    Utilise le code ci-dessous pour vérifier ton adresse email.
+                </p>
+
+                <p>
+                    Ce code est valide pendant <strong>10 minutes</strong>.
+                </p>
+
+                <div style='
+                    background: #f3f4f6;
+                    padding: 20px;
+                    text-align: center;
+                    font-size: 32px;
+                    font-weight: bold;
+                    letter-spacing: 6px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                '>
+                    {$this->code}
+                </div>
+
+                <p>
+                    Si tu n'as pas créé de compte, ignore simplement cet email.
+                </p>
+
+                <hr>
+
+                <p style='font-size: 13px; color: #666;'>
+                    Cordialement,<br>
+                    L'équipe AgriPulse
+                </p>
+            </div>
+        ";
+
+        app(BrevoMailService::class)->send(
+            $notifiable->email,
+            $firstname,
+            'Vérification de votre adresse email',
+            $html
+        );
     }
 
     public function toArray(object $notifiable): array
     {
-        return ['code' => $this->code];
+        return [
+            'code' => $this->code,
+        ];
     }
 }
