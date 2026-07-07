@@ -4,12 +4,12 @@ namespace App\Http\Controllers\Api\Community;
 
 use App\Http\Controllers\Controller;
 use App\Models\{Follow, User, UserProfile};
+use App\Services\CloudinaryService;
 use Illuminate\Http\{JsonResponse, Request};
-use Illuminate\Support\Facades\{Storage, Validator, Log, DB};
+use Illuminate\Support\Facades\{Validator, Log, DB};
 
 class ProfileController extends Controller
 {
-    // Afficher le profil d'un utilisateur
     public function show(Request $request, int $userId): JsonResponse
     {
         try {
@@ -28,7 +28,6 @@ class ProfileController extends Controller
         }
     }
 
-    // Afficher mon profil
     public function me(Request $request): JsonResponse
     {
         $user = $request->user()->load('profile');
@@ -39,7 +38,6 @@ class ProfileController extends Controller
         ]);
     }
 
-    // Mettre à jour le profil
     public function update(Request $request): JsonResponse
     {
         Log::info('Profile update - Files:', array_keys($request->allFiles()));
@@ -68,7 +66,6 @@ class ProfileController extends Controller
         try {
             $user = $request->user();
 
-            // Récupérer ou créer le profil
             $profile = UserProfile::firstOrCreate(
                 ['user_id' => $user->id],
                 []
@@ -76,7 +73,6 @@ class ProfileController extends Controller
 
             $profileData = [];
 
-            // 🔥 GESTION DE L'AVATAR
             if ($request->hasFile('avatar')) {
                 $file = $request->file('avatar');
 
@@ -86,26 +82,14 @@ class ProfileController extends Controller
                     'mime' => $file->getMimeType()
                 ]);
 
-                // Supprimer l'ancien avatar
-                if ($profile->avatar) {
-                    $oldPath = str_replace('/storage/', '', parse_url($profile->avatar, PHP_URL_PATH));
-                    if ($oldPath && Storage::disk('public')->exists($oldPath)) {
-                        Storage::disk('public')->delete($oldPath);
-                    }
-                }
+                $profileData['avatar'] = app(CloudinaryService::class)
+                    ->uploadImageUrl($file, 'agripulse/community/avatars');
 
-                // Générer un nom unique
-                $extension = $file->getClientOriginalExtension();
-                $filename = 'avatar_' . $user->id . '_' . time() . '.' . $extension;
-                $path = $file->storeAs('community/avatars', $filename, 'public');
-
-                if ($path) {
-                    $profileData['avatar'] = asset('storage/' . $path);
-                    Log::info('Avatar saved:', ['url' => $profileData['avatar']]);
-                }
+                Log::info('Avatar uploaded to Cloudinary:', [
+                    'url' => $profileData['avatar']
+                ]);
             }
 
-            // 🔥 GESTION DE LA BANNIÈRE
             if ($request->hasFile('banner')) {
                 $file = $request->file('banner');
 
@@ -115,44 +99,40 @@ class ProfileController extends Controller
                     'mime' => $file->getMimeType()
                 ]);
 
-                // Supprimer l'ancienne bannière
-                if ($profile->banner) {
-                    $oldPath = str_replace('/storage/', '', parse_url($profile->banner, PHP_URL_PATH));
-                    if ($oldPath && Storage::disk('public')->exists($oldPath)) {
-                        Storage::disk('public')->delete($oldPath);
-                    }
-                }
+                $profileData['banner'] = app(CloudinaryService::class)
+                    ->uploadImageUrl($file, 'agripulse/community/banners');
 
-                // Générer un nom unique
-                $extension = $file->getClientOriginalExtension();
-                $filename = 'banner_' . $user->id . '_' . time() . '.' . $extension;
-                $path = $file->storeAs('community/banners', $filename, 'public');
-
-                if ($path) {
-                    $profileData['banner'] = asset('storage/' . $path);
-                    Log::info('Banner saved:', ['url' => $profileData['banner']]);
-                }
+                Log::info('Banner uploaded to Cloudinary:', [
+                    'url' => $profileData['banner']
+                ]);
             }
 
-            // Ajouter les autres champs du profil
-            if ($request->has('headline')) $profileData['headline'] = $request->headline;
-            if ($request->has('bio')) $profileData['bio'] = $request->bio;
-            if ($request->has('location')) $profileData['location'] = $request->location;
-            if ($request->has('website')) $profileData['website'] = $request->website;
+            if ($request->has('headline')) {
+                $profileData['headline'] = $request->headline;
+            }
 
-            // Mettre à jour firstname/lastname dans la table users
+            if ($request->has('bio')) {
+                $profileData['bio'] = $request->bio;
+            }
+
+            if ($request->has('location')) {
+                $profileData['location'] = $request->location;
+            }
+
+            if ($request->has('website')) {
+                $profileData['website'] = $request->website;
+            }
+
             if ($request->has('firstname') || $request->has('lastname')) {
                 $user->update($request->only('firstname', 'lastname'));
             }
 
-            // Mettre à jour le profil
             if (!empty($profileData)) {
                 $profile->update($profileData);
             }
 
             DB::commit();
 
-            // Recharger le user avec son profil
             $user->refresh();
             $user->load('profile');
 
@@ -163,6 +143,7 @@ class ProfileController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             Log::error('Profile update error: ' . $e->getMessage());
             Log::error('Trace: ' . $e->getTraceAsString());
 
@@ -173,7 +154,6 @@ class ProfileController extends Controller
         }
     }
 
-    // Supprimer l'avatar
     public function deleteAvatar(Request $request): JsonResponse
     {
         try {
@@ -181,13 +161,6 @@ class ProfileController extends Controller
             $profile = UserProfile::where('user_id', $user->id)->first();
 
             if ($profile && $profile->avatar) {
-                // Supprimer le fichier
-                $oldPath = str_replace('/storage/', '', parse_url($profile->avatar, PHP_URL_PATH));
-                if ($oldPath && Storage::disk('public')->exists($oldPath)) {
-                    Storage::disk('public')->delete($oldPath);
-                }
-
-                // Supprimer l'URL de la base
                 $profile->update(['avatar' => null]);
 
                 $user->load('profile');
@@ -211,7 +184,6 @@ class ProfileController extends Controller
         }
     }
 
-    // Supprimer la bannière
     public function deleteBanner(Request $request): JsonResponse
     {
         try {
@@ -219,13 +191,6 @@ class ProfileController extends Controller
             $profile = UserProfile::where('user_id', $user->id)->first();
 
             if ($profile && $profile->banner) {
-                // Supprimer le fichier
-                $oldPath = str_replace('/storage/', '', parse_url($profile->banner, PHP_URL_PATH));
-                if ($oldPath && Storage::disk('public')->exists($oldPath)) {
-                    Storage::disk('public')->delete($oldPath);
-                }
-
-                // Supprimer l'URL de la base
                 $profile->update(['banner' => null]);
 
                 $user->load('profile');
@@ -249,13 +214,15 @@ class ProfileController extends Controller
         }
     }
 
-    // Recherche d'utilisateurs
     public function search(Request $request): JsonResponse
     {
         $query = $request->get('q', '');
 
         if (strlen($query) < 2) {
-            return response()->json(['success' => true, 'data' => []]);
+            return response()->json([
+                'success' => true,
+                'data' => []
+            ]);
         }
 
         $users = User::with('profile')
@@ -269,10 +236,12 @@ class ProfileController extends Controller
             ->get()
             ->map(fn($u) => $this->formatProfile($u, $request->user()->id));
 
-        return response()->json(['success' => true, 'data' => $users]);
+        return response()->json([
+            'success' => true,
+            'data' => $users
+        ]);
     }
 
-    // Formatage du profil
     private function formatProfile(User $user, int $authId): array
     {
         return [
@@ -291,7 +260,10 @@ class ProfileController extends Controller
             'following_count' => Follow::where('follower_id', $user->id)->count(),
             'posts_count' => $user->posts()->count(),
             'is_following' => $authId !== $user->id
-                ? Follow::where(['follower_id' => $authId, 'following_id' => $user->id])->exists()
+                ? Follow::where([
+                    'follower_id' => $authId,
+                    'following_id' => $user->id
+                ])->exists()
                 : false,
             'is_me' => $authId === $user->id,
             'created_at' => $user->created_at,
