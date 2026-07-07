@@ -104,7 +104,7 @@ use App\Services\BrevoMailService;
 Route::get('/test-brevo', function (BrevoMailService $brevo) {
 
     $brevo->send(
-        'tonadresse@gmail.com', // Remplace par ton adresse
+        'raoulkm2006@gmail.com', // Remplace par ton adresse
         'Raoul',
         'Test Brevo API',
         '
