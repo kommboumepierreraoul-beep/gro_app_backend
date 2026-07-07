@@ -75,28 +75,49 @@ Route::get('/debug/mail', function () {
 
 
 
-Route::get('/test-brevo', function () {
+// Route::get('/test-brevo', function () {
 
-    try {
+//     try {
 
-        Mail::raw('✅ Félicitations ! Brevo fonctionne correctement avec Laravel.', function ($message) {
+//         Mail::raw('✅ Félicitations ! Brevo fonctionne correctement avec Laravel.', function ($message) {
 
-            $message->to('kommboumepierreraoul@gmail.com') // Remplace par ton adresse
-                ->subject('Test SMTP Brevo');
-        });
+//             $message->to('kommboumepierreraoul@gmail.com') // Remplace par ton adresse
+//                 ->subject('Test SMTP Brevo');
+//         });
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Email envoyé avec succès.'
-        ]);
-    } catch (\Exception $e) {
+//         return response()->json([
+//             'success' => true,
+//             'message' => 'Email envoyé avec succès.'
+//         ]);
+//     } catch (\Exception $e) {
 
-        return response()->json([
-            'success' => false,
-            'message' => 'Échec de l\'envoi.',
-            'error' => $e->getMessage(),
-        ], 500);
-    }
+//         return response()->json([
+//             'success' => false,
+//             'message' => 'Échec de l\'envoi.',
+//             'error' => $e->getMessage(),
+//         ], 500);
+//     }
+// });
+
+use App\Services\BrevoMailService;
+
+Route::get('/test-brevo', function (BrevoMailService $brevo) {
+
+    $brevo->send(
+        'tonadresse@gmail.com', // Remplace par ton adresse
+        'Raoul',
+        'Test Brevo API',
+        '
+        <h2>AgriPulse</h2>
+        <p>Si tu reçois cet email, l\'API Brevo fonctionne correctement ✅</p>
+        <p>Envoyé le : ' . now() . '</p>
+        '
+    );
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Email envoyé avec succès.'
+    ]);
 });
 
 Route::get('/auth/google/callback', [AuthController::class, 'callback']);
