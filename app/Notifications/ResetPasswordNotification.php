@@ -4,10 +4,9 @@ namespace App\Notifications;
 
 use App\Services\BrevoMailService;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
 
-class ResetPasswordNotification extends Notification implements ShouldQueue
+class ResetPasswordNotification extends Notification
 {
     use Queueable;
 
@@ -15,26 +14,24 @@ class ResetPasswordNotification extends Notification implements ShouldQueue
         private readonly string $code
     ) {}
 
-    /**
-     * Envoie directement l'email via Brevo API.
-     */
-    public function send(object $notifiable): void
+    public function via(object $notifiable): array
     {
-        $brevo = app(BrevoMailService::class);
+        return [];
+    }
+
+    public function sendWithBrevo(object $notifiable): void
+    {
+        $firstname = $notifiable->firstname ?? $notifiable->name ?? 'Utilisateur';
 
         $html = "
         <div style='font-family:Arial,sans-serif;max-width:600px;margin:auto'>
             <h2 style='color:#16a34a;'>AgriPulse</h2>
 
-            <p>Hello <strong>{$notifiable->firstname}</strong>,</p>
+            <p>Bonjour <strong>{$firstname}</strong>,</p>
 
-            <p>
-                We received a request to reset your password.
-            </p>
+            <p>Nous avons reçu une demande de réinitialisation de mot de passe.</p>
 
-            <p>
-                Use the verification code below:
-            </p>
+            <p>Utilise le code ci-dessous :</p>
 
             <div style='
                 background:#f3f4f6;
@@ -49,27 +46,23 @@ class ResetPasswordNotification extends Notification implements ShouldQueue
                 {$this->code}
             </div>
 
-            <p>
-                This code is valid for <strong>15 minutes</strong>.
-            </p>
+            <p>Ce code est valide pendant <strong>15 minutes</strong>.</p>
 
-            <p>
-                If you did not request a password reset, you can safely ignore this email.
-            </p>
+            <p>Si tu n'as pas demandé cette réinitialisation, ignore simplement cet email.</p>
 
             <hr>
 
             <p style='color:#666;font-size:13px'>
-                Regards,<br>
-                AgriPulse Team
+                Cordialement,<br>
+                L'équipe AgriPulse
             </p>
         </div>
         ";
 
-        $brevo->send(
+        app(BrevoMailService::class)->send(
             $notifiable->email,
-            $notifiable->firstname,
-            'Reset Your Password',
+            $firstname,
+            'Réinitialisation du mot de passe',
             $html
         );
     }
