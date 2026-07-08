@@ -6,11 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ActivityLog;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
 use App\Mail\ProductApprovedMail;
 use App\Notifications\ProductApproved;
 use App\Notifications\ProductRejected;
 use App\Mail\ProductRejectedMail;
+use App\Services\BrevoMailService;
 
 class AdminProductController extends Controller
 {
@@ -73,20 +73,16 @@ public function approveProduct($id)
         $product->shop->user->email
     ) {
 
-        Mail::to($product->shop->user->email)
-            ->send(
-
-                new ProductApprovedMail(
-
-                    $product->shop->user->firstname
-                        ?? $product->shop->user->name
-                        ?? 'Utilisateur',
-
-                    $product->name
-
-                )
-
-            );
+        app(BrevoMailService::class)->sendMailable(
+            $product->shop->user->email,
+            $product->shop->user->firstname ?? $product->shop->user->name ?? 'Utilisateur',
+            new ProductApprovedMail(
+                $product->shop->user->firstname
+                    ?? $product->shop->user->name
+                    ?? 'Utilisateur',
+                $product->name
+            )
+        );
         $product->shop->user->notify(new \App\Notifications\ProductApproved($product->name));
     }
 
@@ -130,8 +126,9 @@ public function rejectProduct(Request $request, $id)
         $product->shop->user->email
     ) {
 
-        Mail::to($product->shop->user->email)
-            ->send(
+        app(BrevoMailService::class)->sendMailable(
+            $product->shop->user->email,
+            $product->shop->user->firstname ?? $product->shop->user->name ?? 'Utilisateur',
 
                 new ProductRejectedMail(
 

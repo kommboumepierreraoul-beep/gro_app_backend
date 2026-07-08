@@ -14,7 +14,9 @@ use App\Services\Moderation\ModerationService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ServiceProvider;
 use App\Models\Order;
+use App\Mail\Transport\BrevoApiTransport;
 use App\Policies\OrderPolicy;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 
 class AppServiceProvider extends ServiceProvider
@@ -72,6 +74,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Mail::extend('brevo_api', fn () => new BrevoApiTransport());
+
         // ✅ Enregistrer la règle de validation exists_with
         Validator::extend('exists_with', function ($attribute, $value, $parameters, $validator) {
             $contextType = $validator->getData()['context_type'] ?? null;
