@@ -358,28 +358,42 @@ class AuthController extends Controller
             return $this->validationError($validator->errors());
         }
 
-        $user     = User::where('email', $request->email)->first();
-        $cacheKey = 'password_reset_' . $user->id;
+        try {
+            $user = User::where('email', $request->email)->first();
+            $cacheKey = 'password_reset_' . $user->id;
 
-        // Throttle: allow one request per 2 minutes
-        if (Cache::has($cacheKey . '_throttle')) {
+            if (Cache::has($cacheKey . '_throttle')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please wait before requesting another reset code.',
+                ], 429);
+            }
+
+            $code = $this->generateOtp();
+
+            Cache::put($cacheKey, ['code' => $code], now()->addMinutes(15));
+            Cache::put($cacheKey . '_throttle', true, now()->addMinutes(2));
+
+            $notification = new ResetPasswordNotification($code);
+            $notification->sendWithBrevo($user);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Password reset code sent to ' . $request->email,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Password reset email error', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Please wait before requesting another reset code.',
-            ], 429);
+                'message' => 'Erreur lors de l’envoi du mail.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
+            ], 500);
         }
-
-        $code = $this->generateOtp();
-
-        Cache::put($cacheKey, ['code' => $code], now()->addMinutes(15));
-        Cache::put($cacheKey . '_throttle', true, now()->addMinutes(2));
-
-        $user->notify(new ResetPasswordNotification($code));
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Password reset code sent to ' . $request->email,
-        ]);
     }
 
     /**
@@ -668,12 +682,13 @@ class AuthController extends Controller
      */
     private function sendVerificationEmail(User $user): void
     {
-        $code     = $this->generateOtp();
+        $code = $this->generateOtp();
         $cacheKey = $this->otpCacheKey($user->id);
 
         Cache::put($cacheKey, ['code' => $code], now()->addMinutes(10));
 
-        $user->notify(new EmailVerificationNotification($code));
+        $notification = new EmailVerificationNotification($code);
+        $notification->sendWithBrevo($user);
     }
 
     /**
