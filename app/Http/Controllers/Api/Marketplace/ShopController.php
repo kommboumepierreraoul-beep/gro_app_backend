@@ -26,10 +26,15 @@ class ShopController extends Controller
 {
     $user = $request->user();
 
-    if ($user->shop) {
+    $existingShop = $user->shop;
+
+    if ($existingShop && $existingShop->status !== 'rejected') {
         return response()->json([
             'success' => false,
-            'message' => 'You already have a shop'
+            'message' => $existingShop->status === 'pending'
+                ? 'Votre demande de boutique est deja en attente de validation.'
+                : 'You already have a shop',
+            'data' => $existingShop,
         ], 400);
     }
 
@@ -56,18 +61,25 @@ class ShopController extends Controller
             ->uploadImageUrl($request->file('banner'), 'agripulse/shops/banners');
     }
 
-    $shop = Shop::create([
+    $payload = [
         'user_id'     => $user->id,
         'name'        => $request->name,
         'slug'        => Str::slug($request->name) . '-' . $user->id,
         'description' => $request->description,
-        'logo'        => $logoPath,
-        'banner'      => $bannerPath,
+        'logo'        => $logoPath ?? $existingShop?->logo,
+        'banner'      => $bannerPath ?? $existingShop?->banner,
         'address'     => $request->address,
         'city'        => $request->city,
         'phone'       => $request->phone,
         'status'      => 'pending',
-    ]);
+    ];
+
+    if ($existingShop) {
+        $existingShop->update($payload);
+        $shop = $existingShop->fresh();
+    } else {
+        $shop = Shop::create($payload);
+    }
 
     return response()->json([
         'success' => true,

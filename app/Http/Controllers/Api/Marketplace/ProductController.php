@@ -70,6 +70,13 @@ class ProductController extends Controller
             ], 400);
         }
 
+        if ($shop->status !== 'active') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Votre boutique doit etre approuvee par un administrateur avant de publier des produits.'
+            ], 403);
+        }
+
         $request->validate([
             'name'                => 'required|string|max:255',
             'description'         => 'required|string',

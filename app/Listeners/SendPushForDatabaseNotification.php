@@ -74,6 +74,8 @@ class SendPushForDatabaseNotification
             'order_completed' => 'Commande terminee',
             'product_approved' => 'Produit approuve',
             'product_rejected' => 'Produit rejete',
+            'shop_approved' => 'Boutique approuvee',
+            'shop_rejected' => 'Boutique a corriger',
             'dispute_created' => 'Nouveau litige',
             'dispute_message' => 'Nouveau message litige',
             'dispute_resolved' => 'Litige resolu',

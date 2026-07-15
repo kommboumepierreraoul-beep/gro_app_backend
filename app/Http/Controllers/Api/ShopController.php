@@ -29,13 +29,24 @@ class ShopController extends Controller
 
     // 1. Récupérer l'utilisateur authentifié
     $user = $request->user();
+    $existingShop = $user->shop;
+
+    if ($existingShop && $existingShop->status !== 'rejected') {
+        return response()->json([
+            'success' => false,
+            'message' => $existingShop->status === 'pending'
+                ? 'Votre demande de boutique est deja en attente de validation.'
+                : 'You already have a shop',
+            'data' => $existingShop,
+        ], 400);
+    }
 
     // 2. Validation
    $request->validate([
     'name'        => 'required|string|max:255',
     'description' => 'nullable|string',
-    'logo'        => 'required|image|mimes:jpeg,png,jpg,gif|max:5120', // 'required' pour forcer le test
-    'banner'      => 'required|image|mimes:jpeg,png,jpg,gif|max:10240',
+    'logo'        => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120',
+    'banner'      => 'nullable|image|mimes:jpeg,png,jpg,gif|max:10240',
     'address'     => 'nullable|string',
     'city'        => 'nullable|string',
     'phone'       => 'nullable|string',
@@ -54,19 +65,25 @@ class ShopController extends Controller
             ->uploadImageUrl($request->file('banner'), 'agripulse/shops/banners');
     }
 
-    // 4. Création avec les chemins de stockage
-    $shop = Shop::create([
+    $payload = [
         'user_id'     => $user->id,
         'name'        => $request->name,
         'slug'        => Str::slug($request->name) . '-' . $user->id,
         'description' => $request->description,
-        'logo'        => $logoPath,   // On stocke le chemin relatif, c'est la bonne pratique
-        'banner'      => $bannerPath, // On ne met pas asset() ici pour garder la flexibilité
+        'logo'        => $logoPath ?? $existingShop?->logo,
+        'banner'      => $bannerPath ?? $existingShop?->banner,
         'address'     => $request->address,
         'city'        => $request->city,
         'phone'       => $request->phone,
         'status'      => 'pending',
-    ]);
+    ];
+
+    if ($existingShop) {
+        $existingShop->update($payload);
+        $shop = $existingShop->fresh();
+    } else {
+        $shop = Shop::create($payload);
+    }
 
     return response()->json([
         'success' => true,
