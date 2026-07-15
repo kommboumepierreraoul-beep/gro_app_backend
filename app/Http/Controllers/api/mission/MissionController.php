@@ -17,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class MissionController extends Controller
@@ -53,7 +54,11 @@ class MissionController extends Controller
         ]);
 
         $query = Mission::active()
-            ->with(['author:id,firstname', 'category:id,name,slug,icon,color'])
+            ->with([
+                'author:id,firstname,lastname',
+                'author.profile:id,user_id,avatar',
+                'category:id,name,slug,icon,color',
+            ])
             ->withCount('applications');
 
         // Géolocalisation
@@ -127,7 +132,7 @@ class MissionController extends Controller
 
         // Lancer la diffusion si publiée directement
         if ($mission->status === Mission::STATUS_PUBLISHED) {
-            DiffuseMissionJob::dispatch($mission)->onQueue('notifications');
+            $this->dispatchJobSafely(fn () => DiffuseMissionJob::dispatch($mission)->onQueue('notifications'));
         }
 
         return new MissionDetailResource($mission->load(['author', 'category']));
@@ -158,11 +163,7 @@ class MissionController extends Controller
             ->firstOrFail();
 
         // Enregistrer la vue en asynchrone
-        RecordMissionViewJob::dispatch(
-            $mission->id,
-            $request->user()?->id,
-            md5($request->ip())
-        )->onQueue('low');
+        $this->recordMissionView($mission, $request);
 
         // Ajouter les coordonnées PostGIS
         $latLng = $mission->getLatLng();
@@ -208,8 +209,8 @@ class MissionController extends Controller
 
         // Notifier les candidats existants si la mission est modifiée
         if ($mission->applications()->exists()) {
-            \App\Jobs\Mission\NotifyApplicantsOfMissionUpdateJob::dispatch($mission)
-                ->onQueue('notifications');
+            $this->dispatchJobSafely(fn () => \App\Jobs\Mission\NotifyApplicantsOfMissionUpdateJob::dispatch($mission)
+                ->onQueue('notifications'));
         }
 
         return new MissionDetailResource($mission->fresh(['author', 'category']));
@@ -261,13 +262,13 @@ class MissionController extends Controller
 
         // Diffuser si re-publiée depuis suspension
         if ($newStatus === Mission::STATUS_PUBLISHED) {
-            DiffuseMissionJob::dispatch($mission)->onQueue('notifications');
+            $this->dispatchJobSafely(fn () => DiffuseMissionJob::dispatch($mission)->onQueue('notifications'));
         }
 
         // Planifier les évaluations si terminée
         if ($newStatus === Mission::STATUS_COMPLETED) {
-            \App\Jobs\Mission\ScheduleReviewPromptsJob::dispatch($mission)
-                ->onQueue('notifications');
+            $this->dispatchJobSafely(fn () => \App\Jobs\Mission\ScheduleReviewPromptsJob::dispatch($mission)
+                ->onQueue('notifications'));
         }
 
         return new MissionDetailResource($mission->fresh(['author', 'category']));
@@ -334,7 +335,7 @@ class MissionController extends Controller
             LEFT JOIN mission_categories mc ON m.category_id = mc.id
             WHERE m.status = 'published'
               AND m.deleted_at IS NULL
-              AND (m.expires_at IS NULL)
+              AND (m.expires_at IS NULL OR m.expires_at > NOW())
               AND m.location_point IS NOT NULL
               AND ST_DWithin(
                     m.location_point::geography,
@@ -377,11 +378,7 @@ class MissionController extends Controller
     {
         $mission = Mission::where('ulid', $ulid)->firstOrFail();
 
-        RecordMissionViewJob::dispatch(
-            $mission->id,
-            $request->user()?->id,
-            md5($request->ip())
-        )->onQueue('low');
+        $this->recordMissionView($mission, $request);
 
         return response()->json(['message' => 'ok']);
     }
@@ -427,6 +424,42 @@ class MissionController extends Controller
             foreach ($application->attachment_paths ?? [] as $path) {
                 Storage::disk('public')->delete($path);
             }
+        }
+    }
+
+    private function dispatchJobSafely(callable $dispatch): void
+    {
+        try {
+            $dispatch();
+        } catch (\Throwable $e) {
+            Log::warning('Mission job skipped: ' . $e->getMessage());
+        }
+    }
+
+    private function recordMissionView(Mission $mission, Request $request): void
+    {
+        try {
+            if (config('queue.default') === 'sync') {
+                $view = MissionView::firstOrCreate([
+                    'mission_id' => $mission->id,
+                    'user_id' => $request->user()?->id,
+                    'ip_hash' => md5($request->ip()),
+                ], [
+                    'viewed_at' => now(),
+                ]);
+                if ($view->wasRecentlyCreated) {
+                    $mission->increment('views_count');
+                }
+                return;
+            }
+
+            RecordMissionViewJob::dispatch(
+                $mission->id,
+                $request->user()?->id,
+                md5($request->ip())
+            )->onQueue('low');
+        } catch (\Throwable $e) {
+            Log::warning('Mission view not recorded: ' . $e->getMessage());
         }
     }
 }

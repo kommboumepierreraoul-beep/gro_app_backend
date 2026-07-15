@@ -93,7 +93,11 @@ class MissionApplicationController extends Controller
 
         // ── Notifier l'auteur (email + in-app) ──────────────────────────────
         // → envoie NewApplicationMail à $mission->author->email
-        $mission->author->notify(new NewApplicationReceived($application->load(['applicant', 'mission.category'])));
+        try {
+            $mission->author->notify(new NewApplicationReceived($application->load(['applicant', 'mission.category'])));
+        } catch (\Throwable $e) {
+            Log::warning("Notification candidature mission #{$mission->id} non envoyee : {$e->getMessage()}");
+        }
 
         return response()->json([
             'message' => 'Candidature envoyée avec succès.',

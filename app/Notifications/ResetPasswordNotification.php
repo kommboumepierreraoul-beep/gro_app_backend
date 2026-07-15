@@ -23,46 +23,22 @@ class ResetPasswordNotification extends Notification
     {
         $firstname = $notifiable->firstname ?? $notifiable->name ?? 'Utilisateur';
 
-        $html = "
-        <div style='font-family:Arial,sans-serif;max-width:600px;margin:auto'>
-            <h2 style='color:#16a34a;'>AgriPulse</h2>
-
-            <p>Bonjour <strong>{$firstname}</strong>,</p>
-
-            <p>Nous avons reçu une demande de réinitialisation de mot de passe.</p>
-
-            <p>Utilise le code ci-dessous :</p>
-
-            <div style='
-                background:#f3f4f6;
-                padding:20px;
-                text-align:center;
-                font-size:32px;
-                font-weight:bold;
-                letter-spacing:6px;
-                border-radius:8px;
-                margin:20px 0;
-            '>
-                {$this->code}
-            </div>
-
-            <p>Ce code est valide pendant <strong>15 minutes</strong>.</p>
-
-            <p>Si tu n'as pas demandé cette réinitialisation, ignore simplement cet email.</p>
-
-            <hr>
-
-            <p style='color:#666;font-size:13px'>
-                Cordialement,<br>
-                L'équipe AgriPulse
-            </p>
-        </div>
-        ";
+        $html = view('emails.auth-code', [
+            'title' => 'Reinitialisation du mot de passe',
+            'preheader' => 'Votre code de reinitialisation AgriPulse.',
+            'badge' => 'Compte',
+            'accent' => '#154212',
+            'firstname' => $firstname,
+            'intro' => 'Nous avons recu une demande de reinitialisation de mot de passe pour votre compte AgriPulse.',
+            'code' => $this->code,
+            'validity' => '15 minutes',
+            'ignoreText' => "Si vous n'avez pas demande cette reinitialisation, vous pouvez ignorer cet email.",
+        ])->render();
 
         app(BrevoMailService::class)->send(
             $notifiable->email,
             $firstname,
-            'Réinitialisation du mot de passe',
+            'Reinitialisation du mot de passe',
             $html
         );
     }

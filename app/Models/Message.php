@@ -45,6 +45,7 @@ class Message extends Model
         'content',
         'media_url',
         'status',
+        'reply_to_id',
         'media_type',
         'media_size',
         'file_name'
@@ -59,5 +60,10 @@ class Message extends Model
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
+    }
+
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(Message::class, 'reply_to_id')->with('sender');
     }
 }

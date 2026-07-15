@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use App\Events\OrderPaid;
@@ -29,6 +30,14 @@ class OrderController extends Controller
     // ==================== STORE ====================
     public function store(Request $request)
     {
+        $request->validate([
+            'shipping_address' => ['required', 'string', 'max:500'],
+            'payment_method' => ['nullable', 'in:notchpay,wallet,cash_on_delivery'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+
         $user = $request->user();
         $cartItems = $request->input('items', []);
         if (empty($cartItems)) {
@@ -36,9 +45,13 @@ class OrderController extends Controller
         }
 
         $shopId = $request->input('shop_id');
+        $firstProduct = null;
         if (!$shopId && !empty($cartItems)) {
-            $firstProduct = \App\Models\Product::find($cartItems[0]['product_id']);
+            $firstProduct = \App\Models\Product::with('shop')->find($cartItems[0]['product_id']);
             if ($firstProduct) $shopId = $firstProduct->shop_id;
+        }
+        if (!$firstProduct && !empty($cartItems)) {
+            $firstProduct = \App\Models\Product::with('shop')->find($cartItems[0]['product_id']);
         }
 
         $total = 0;
@@ -49,6 +62,9 @@ class OrderController extends Controller
             if (!$product) {
                 return response()->json(['success' => false, 'message' => 'Produit introuvable'], 422);
             }
+            if (($product->status ?? null) !== 'approved') {
+                return response()->json(['success' => false, 'message' => 'Ce produit n\'est pas disponible'], 422);
+            }
             $price = $product->price;
             $total += $item['quantity'] * $price;
             $orderItemsData[] = [
@@ -58,20 +74,35 @@ class OrderController extends Controller
             ];
         }
 
+        $paymentMethod = $request->input('payment_method', 'notchpay');
+
         $order = Order::create([
             'user_id'          => $user->id,
+            'seller_id'        => $firstProduct?->shop?->user_id,
             'shop_id'          => $shopId,
             'order_number'     => 'ORD-' . Str::random(8),
             'total_amount'     => $total,
             'shipping_address' => $request->shipping_address,
             'status'           => 'pending',
+            'payment_method'   => $paymentMethod,
+            'payment_status'   => $paymentMethod === 'cash_on_delivery' ? 'cash_on_delivery' : 'pending',
         ]);
 
         foreach ($orderItemsData as $data) {
             OrderItem::create(array_merge($data, ['order_id' => $order->id]));
         }
 
-        return response()->json(['success' => true, 'data' => $order]);
+        if ($paymentMethod === 'cash_on_delivery') {
+            $this->notifyOrderConfirmed($order);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $paymentMethod === 'cash_on_delivery'
+                ? 'Commande confirmée. Paiement prévu à la livraison.'
+                : 'Commande créée. Choisissez un moyen de paiement.',
+            'data' => $order->load(['items.product', 'shop']),
+        ]);
     }
 
     // ==================== PRÉPARER (vendeur) ====================
@@ -91,7 +122,11 @@ class OrderController extends Controller
         ]);
 
         $this->authorize('update', $order);
-        if ($order->status !== 'paid') {
+        $canPrepareCashOnDelivery = $order->payment_method === 'cash_on_delivery'
+            && $order->payment_status === 'cash_on_delivery'
+            && $order->status === 'pending';
+
+        if ($order->status !== 'paid' && !$canPrepareCashOnDelivery) {
             Log::warning('prepareOrder refusée', ['status_reçu' => $order->status]);
             return response()->json(['success' => false, 'message' => 'Commande non payée'], 422);
         }
@@ -149,6 +184,9 @@ class OrderController extends Controller
 
         if ($order->seller_confirmed_delivery && $order->client_confirmed_delivery) {
             $order->status = 'completed';
+            if ($order->payment_method === 'cash_on_delivery') {
+                $order->payment_status = 'completed';
+            }
             $order->save();
             $this->releaseFundsToSeller($order);
         }
@@ -211,6 +249,23 @@ class OrderController extends Controller
                 Log::error('Email OrderCompleted échoué : ' . $e->getMessage());
             }
         });
+    }
+
+    private function notifyOrderConfirmed(Order $order): void
+    {
+        try {
+            $order->loadMissing(['user', 'items.product', 'shop.user']);
+
+            if ($order->user && $order->user->email) {
+                Mail::to($order->user->email)->send(new OrderConfirmedMail($order));
+            }
+
+            if ($order->shop && $order->shop->user && $order->shop->user->email) {
+                Mail::to($order->shop->user->email)->send(new NewOrderReceivedMail($order));
+            }
+        } catch (\Exception $e) {
+            Log::error('Emails confirmation commande echoues : ' . $e->getMessage());
+        }
     }
 
     // ==================== WEBHOOK NOTCHPAY ====================
@@ -405,7 +460,7 @@ class OrderController extends Controller
 
             ]);
 
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
 
             Log::error("Erreur NotchPay: " . $e->getMessage());
 
@@ -604,6 +659,8 @@ public function trackOrder($orderNumber, Request $request)
     return response()->json([
         'order_number' => $order->order_number,
         'status' => $order->status,
+        'payment_method' => $order->payment_method,
+        'payment_status' => $order->payment_status,
         'current_step' => $currentStep,
         'steps' => $steps,
         'total_amount' => $order->total_amount,
@@ -620,7 +677,7 @@ public function trackOrder($orderNumber, Request $request)
 public function getTrackingData($orderNumber, Request $request)
 {
     $email = $request->input('email');
-    $order = Order::where('order_number', $orderNumber)->with('user')->first();
+    $order = Order::where('order_number', $orderNumber)->with(['user', 'shop', 'items.product'])->first();
     if (!$order || $order->user->email !== $email) {
         return response()->json(['error' => 'Accès non autorisé'], 403);
     }
@@ -637,16 +694,38 @@ public function getTrackingData($orderNumber, Request $request)
         'client' => $clientLocation,
         'delivery' => $deliveryLocation,
         'status' => $order->status,
+        'payment_method' => $order->payment_method,
+        'payment_status' => $order->payment_status,
+        'order' => [
+            'order_number' => $order->order_number,
+            'total_amount' => $order->total_amount,
+            'shipping_address' => $order->shipping_address,
+            'shop_name' => $order->shop?->name,
+            'items_count' => $order->items->sum('quantity'),
+            'created_at' => $order->created_at?->toIso8601String(),
+        ],
     ]);
 }
 
 // Fonction utilitaire de géocodage (simulé, à améliorer avec une API comme OpenStreetMap Nominatim)
 private function geocodeAddress($address)
 {
+    $address = trim((string) $address);
+    if ($address === '') {
+        return ['lat' => 3.8480, 'lng' => 11.5021];
+    }
+
+    $cacheKey = 'geocode:' . md5($address);
+    if (Cache::has($cacheKey)) {
+        return Cache::get($cacheKey);
+    }
+
     $url = "https://nominatim.openstreetmap.org/search?q=" . urlencode($address) . "&format=json&limit=1";
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
     curl_setopt($ch, CURLOPT_USERAGENT, 'AgriApp/1.0');
     $json = curl_exec($ch);
     curl_close($ch);

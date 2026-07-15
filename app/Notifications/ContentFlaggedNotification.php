@@ -1,5 +1,4 @@
 <?php
-// app/Notifications/ContentFlaggedNotification.php
 
 namespace App\Notifications;
 
@@ -32,62 +31,30 @@ class ContentFlaggedNotification extends Notification implements ShouldQueue
         $contentType = class_basename($this->content);
         $contentId = $this->content->id;
         $name = $notifiable->name ?? $notifiable->firstname ?? 'Administrateur';
-
         $categories = is_array($this->moderationLog->categories)
             ? implode(', ', $this->moderationLog->categories)
-            : ($this->moderationLog->categories ?? 'Non spécifiées');
+            : ($this->moderationLog->categories ?? 'Non specifiees');
+        $reason = $this->moderationLog->reason ?? 'Non specifiee';
+        $score = $this->moderationLog->score;
+        $action = $this->moderationLog->action;
+        $url = rtrim(config('app.frontend_url', env('FRONTEND_URL', config('app.url'))), '/')
+            . '/admin/moderation/' . $contentId;
 
-        $url = url('/admin/moderation/' . $contentId);
-
-        $html = "
-            <div style='font-family: Arial, sans-serif; max-width: 650px; margin: auto;'>
-                <h2 style='color: #dc2626;'>Contenu signalé - Action requise</h2>
-
-                <p>Bonjour <strong>{$name}</strong>,</p>
-
-                <p>
-                    Un contenu a été signalé par le système de modération automatique.
-                </p>
-
-                <div style='background: #f9fafb; padding: 16px; border-radius: 8px;'>
-                    <p><strong>Type de contenu :</strong> {$contentType}</p>
-                    <p><strong>ID du contenu :</strong> {$contentId}</p>
-                    <p><strong>Score de risque :</strong> {$this->moderationLog->score}</p>
-                    <p><strong>Raison :</strong> " . ($this->moderationLog->reason ?? 'Non spécifiée') . "</p>
-                    <p><strong>Catégories :</strong> {$categories}</p>
-                    <p><strong>Action :</strong> {$this->moderationLog->action}</p>
-                </div>
-
-                <p style='margin-top: 20px;'>
-                    Veuillez examiner ce contenu dans les plus brefs délais.
-                </p>
-
-                <p>
-                    <a href='{$url}' style='
-                        background: #16a34a;
-                        color: white;
-                        padding: 12px 18px;
-                        text-decoration: none;
-                        border-radius: 6px;
-                        display: inline-block;
-                    '>
-                        Voir le contenu
-                    </a>
-                </p>
-
-                <hr>
-
-                <p style='font-size: 13px; color: #666;'>
-                    Cordialement,<br>
-                    L'équipe AgriPulse
-                </p>
-            </div>
-        ";
+        $html = view('emails.content-flagged', compact(
+            'contentType',
+            'contentId',
+            'name',
+            'categories',
+            'reason',
+            'score',
+            'action',
+            'url'
+        ))->render();
 
         app(BrevoMailService::class)->send(
             $notifiable->email,
             $name,
-            'Contenu signalé - Action requise',
+            'Contenu signale - Action requise',
             $html
         );
     }
@@ -103,7 +70,7 @@ class ContentFlaggedNotification extends Notification implements ShouldQueue
             'categories' => $this->moderationLog->categories,
             'reason' => $this->moderationLog->reason,
             'action' => $this->moderationLog->action,
-            'message' => 'Un contenu a été signalé et nécessite votre attention.',
+            'message' => 'Un contenu a ete signale et necessite votre attention.',
         ];
     }
 

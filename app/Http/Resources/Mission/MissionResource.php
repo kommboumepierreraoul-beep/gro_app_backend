@@ -32,7 +32,7 @@ class MissionResource extends JsonResource
                 'name'      => $this->author->name,
                 'firstname' => $this->author->firstname,
                 'lastname'  => $this->author->lastname,
-                'avatar'    => $this->author->profile?->avatar,
+                'avatar'    => $this->author->profile?->avatar_url ?? $this->author->profile?->avatar,
             ]),
 
             // Durée

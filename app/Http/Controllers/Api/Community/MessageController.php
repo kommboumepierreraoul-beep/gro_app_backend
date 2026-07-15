@@ -223,7 +223,7 @@ class MessageController extends Controller
             }
 
             $messages = Message::where('conversation_id', $conversationId)
-                ->with('sender')
+                ->with(['sender', 'replyTo.sender'])
                 ->orderBy('created_at', 'desc')
                 ->paginate(30);
 
@@ -241,6 +241,7 @@ class MessageController extends Controller
                     'media_size' => $msg->media_size,
                     'file_name' => $msg->file_name,
                     'status' => $msg->status,
+                    'reply_to' => $this->formatReplyTo($msg->replyTo),
                     'is_mine' => $msg->sender_id === $user->id,
                     'sender_id' => $msg->sender_id,
                     'sender' => [
@@ -277,6 +278,7 @@ class MessageController extends Controller
             }
 
             $content = $request->input('content', '');
+            $replyToId = $request->input('reply_to_id');
             $mediaUrl = null;
 
             // Upload du fichier
@@ -318,8 +320,18 @@ class MessageController extends Controller
             if (in_array('file_name', $columns)) {
                 $messageData['file_name'] = null;
             }
+            if (in_array('reply_to_id', $columns) && $replyToId) {
+                $canReplyTo = Message::where('id', $replyToId)
+                    ->where('conversation_id', $conversationId)
+                    ->exists();
+
+                if ($canReplyTo) {
+                    $messageData['reply_to_id'] = $replyToId;
+                }
+            }
 
             $message = Message::create($messageData);
+            $message->load('replyTo.sender');
 
             // Mettre à jour la conversation
             DB::table('conversations')
@@ -338,6 +350,7 @@ class MessageController extends Controller
                     'content' => $message->content,
                     'media_url' => $message->media_url,
                     'status' => $message->status,
+                    'reply_to' => $this->formatReplyTo($message->replyTo),
                     'is_mine' => true,
                     'sender_id' => $user->id,
                     'sender' => [
@@ -358,6 +371,25 @@ class MessageController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function formatReplyTo(?Message $message): ?array
+    {
+        if (!$message) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $message->id,
+            'content' => $message->content,
+            'media_url' => $message->media_url,
+            'media_type' => $message->media_type ?? null,
+            'sender' => [
+                'id' => $message->sender?->id,
+                'firstname' => $message->sender?->firstname ?? 'Utilisateur',
+                'lastname' => $message->sender?->lastname ?? '',
+            ],
+        ];
     }
 
     // Récupérer le statut d'un message spécifique

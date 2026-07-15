@@ -57,9 +57,15 @@ class UserProfile extends Model
     // Accessor pour obtenir l'URL complète de l'avatar et gérer le cas où il n'y en a pas
     public function getAvatarUrlAttribute(): string
     {
-        return $this->avatar
-            ? Storage::url($this->avatar)
-            : asset('images/default-avatar.png');
+        if (!$this->avatar) {
+            return asset('images/default-avatar.png');
+        }
+
+        if (str_starts_with($this->avatar, 'http://') || str_starts_with($this->avatar, 'https://')) {
+            return $this->avatar;
+        }
+
+        return Storage::url($this->avatar);
     }
     
 }

@@ -1,17 +1,27 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head><meta charset="UTF-8"><title>Confirmation commande</title></head>
-<body style="font-family: Arial, sans-serif;">
-<h2>✅ Votre commande est confirmée</h2>
-<p>Bonjour {{ $order->user->firstname ?? 'Client' }},</p>
-<p>Votre commande n° <strong>{{ $order->order_number }}</strong> d’un montant total de <strong>{{ number_format($order->total_amount, 0, ',', ' ') }} FCFA</strong> a bien été payée.</p>
-<p><strong>Produits commandés :</strong></p>
-<ul>
-@foreach($order->items as $item)
-    <li>{{ $item->quantity }} x {{ $item->product->name ?? 'Produit' }} — {{ number_format($item->unit_price * $item->quantity, 0, ',', ' ') }} FCFA</li>
-@endforeach
-</ul>
-<p>Nous vous tiendrons informé de son expédition.</p>
-<p>Merci de votre confiance.</p>
-</body>
-</html>
+@extends('emails.layout', [
+    'title' => 'Commande confirmée',
+    'preheader' => 'Votre commande ' . $order->order_number . ' a bien été prise en charge.',
+    'badge' => 'Marketplace',
+    'ctaLabel' => 'Voir mes commandes',
+    'ctaUrl' => rtrim(config('app.frontend_url', env('FRONTEND_URL', config('app.url'))), '/') . '/orders',
+])
+
+@section('content')
+    <p style="margin:0 0 14px 0;">Bonjour <strong>{{ $order->user->firstname ?? 'Client' }}</strong>,</p>
+    <p style="margin:0 0 18px 0;">
+        Votre commande <strong>#{{ $order->order_number }}</strong> a été confirmée pour un montant de
+        <strong style="color:#154212;">{{ number_format($order->total_amount, 0, ',', ' ') }} FCFA</strong>.
+    </p>
+
+    <div style="border:1px solid #c2c9bb;background:#f9faf2;border-radius:12px;padding:14px 16px;margin:18px 0;">
+        <p style="margin:0 0 10px 0;color:#154212;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Produits commandés</p>
+        @foreach($order->items as $item)
+            <div style="padding:9px 0;border-top:{{ $loop->first ? '0' : '1px solid #e2e3dc' }};">
+                <strong>{{ $item->quantity }} x {{ $item->product->name ?? 'Produit' }}</strong>
+                <span style="float:right;color:#154212;font-weight:800;">{{ number_format($item->unit_price * $item->quantity, 0, ',', ' ') }} FCFA</span>
+            </div>
+        @endforeach
+    </div>
+
+    <p style="margin:18px 0 0 0;">Nous vous informerons dès que le vendeur préparera et expédiera votre commande.</p>
+@endsection

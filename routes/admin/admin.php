@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Admin\AdminUserController;
 use App\Http\Controllers\Api\Admin\AdminActivityController;
 use App\Http\Controllers\Api\Admin\AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\AdminCategoryController;
+use App\Http\Controllers\Api\Admin\AdminSystemController;
 use App\Http\Controllers\Api\OrderController;
 use Illuminate\Support\Facades\Route;
 
@@ -36,4 +37,14 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
 
     // Commandes
     Route::get('orders', [OrderController::class, 'adminOrders']);
+
+    // Console admin systeme : CRUD + actions metier
+    Route::get('system/users/{id}/insights', [AdminSystemController::class, 'userInsights']);
+    Route::get('system/{resource}', [AdminSystemController::class, 'index']);
+    Route::post('system/{resource}', [AdminSystemController::class, 'store']);
+    Route::get('system/{resource}/{id}', [AdminSystemController::class, 'show']);
+    Route::put('system/{resource}/{id}', [AdminSystemController::class, 'update']);
+    Route::patch('system/{resource}/{id}', [AdminSystemController::class, 'update']);
+    Route::delete('system/{resource}/{id}', [AdminSystemController::class, 'destroy']);
+    Route::post('system/{resource}/{id}/actions/{action}', [AdminSystemController::class, 'action']);
 });

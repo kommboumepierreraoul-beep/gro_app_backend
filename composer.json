@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "barryvdh/laravel-dompdf": "^3.1",
         "deepseek-php/deepseek-php-client": "^2.1",
         "getbrevo/brevo-php": "^5.0",
         "intervention/image": "^4.1",

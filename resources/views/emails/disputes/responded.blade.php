@@ -1,14 +1,20 @@
-<!DOCTYPE html>
-<html>
-<body style="font-family: sans-serif; background:#f4f4f4; padding:20px;">
-<div style="max-width:600px;margin:auto;background:white;border-radius:12px;padding:30px;">
-  <h2 style="color:#059669;">Réponse à votre litige</h2>
-  <p>Le vendeur a répondu à votre litige sur la commande <strong>#{{ $dispute->order->order_number }}</strong>.</p>
-  <p><strong>Sa réponse :</strong> {{ $dispute->seller_response }}</p>
-  <a href="{{ config('app.url') }}/disputes/{{ $dispute->id }}"
-     style="display:inline-block;margin-top:16px;padding:12px 24px;background:#059669;color:white;border-radius:8px;text-decoration:none;">
-    Voir le litige
-  </a>
-</div>
-</body>
-</html>
+@extends('emails.layout', [
+    'title' => 'Réponse à votre litige',
+    'preheader' => 'Le vendeur a répondu à votre litige.',
+    'badge' => 'Support',
+    'ctaLabel' => 'Voir le litige',
+    'ctaUrl' => rtrim(config('app.frontend_url', env('FRONTEND_URL', config('app.url'))), '/') . '/disputes/' . $dispute->id,
+])
+
+@section('content')
+    <p style="margin:0 0 14px 0;">
+        Le vendeur a répondu au litige lié à la commande <strong>#{{ $dispute->order->order_number }}</strong>.
+    </p>
+
+    <div style="border-left:4px solid #154212;background:#f9faf2;border-radius:12px;padding:14px 16px;margin:18px 0;">
+        <p style="margin:0 0 8px 0;color:#154212;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Réponse du vendeur</p>
+        <p style="margin:0;">{{ $dispute->seller_response }}</p>
+    </div>
+
+    <p style="margin:18px 0 0 0;">Vous pouvez continuer l'échange depuis votre espace litiges.</p>
+@endsection

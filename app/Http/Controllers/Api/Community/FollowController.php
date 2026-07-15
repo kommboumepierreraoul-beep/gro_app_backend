@@ -8,6 +8,52 @@ use Illuminate\Http\{JsonResponse, Request};
 
 class FollowController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $search = trim((string) $request->get('search', ''));
+        $followingIds = Follow::where('follower_id', $user->id)->pluck('following_id')->all();
+
+        $users = User::with('profile')
+            ->withCount(['posts', 'followers', 'following'])
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('firstname', 'like', "%{$search}%")
+                        ->orWhere('lastname', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhereHas('profile', function ($profile) use ($search) {
+                            $profile->where('headline', 'like', "%{$search}%")
+                                ->orWhere('bio', 'like', "%{$search}%")
+                                ->orWhere('location', 'like', "%{$search}%");
+                        });
+                });
+            })
+            ->latest()
+            ->paginate($request->integer('per_page', 24));
+
+        $users->getCollection()->transform(fn ($u) => [
+            'id' => $u->id,
+            'firstname' => $u->firstname,
+            'lastname' => $u->lastname,
+            'email' => $u->email,
+            'avatar' => $u->profile?->avatar,
+            'role' => $u->role,
+            'status' => $u->status,
+            'headline' => $u->profile?->headline,
+            'bio' => $u->profile?->bio,
+            'location' => $u->profile?->location,
+            'followers_count' => $u->followers_count,
+            'following_count' => $u->following_count,
+            'posts_count' => $u->posts_count,
+            'is_following' => in_array($u->id, $followingIds, true),
+            'is_me' => $u->id === $user->id,
+            'is_verified' => $u->email_verified_at !== null,
+            'created_at' => $u->created_at,
+        ]);
+
+        return response()->json(['success' => true, 'data' => $users]);
+    }
+
     // Suivre / Ne plus suivre
     public function toggle(Request $request, $userId): JsonResponse  // ✅ Supprimer le typage int
     {

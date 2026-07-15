@@ -24,6 +24,6 @@ class NewDisputeMessageMail extends Mailable
     public function build()
     {
         return $this->subject('Nouveau message dans votre litige')
-                    ->markdown('emails.disputes.new-message');
+                    ->view('emails.disputes.new-message');
     }
 }

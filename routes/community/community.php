@@ -53,9 +53,11 @@ Route::prefix('community')->middleware(['auth:sanctum'])->group(function () {
     Route::prefix('users')->group(function () {
         // ✅ Route statique EN PREMIER
         Route::get('/suggestions',           [FollowController::class, 'suggestions']);
+        Route::get('/',                      [FollowController::class, 'index']);
 
         // ✅ Wildcards EN DERNIER
         Route::post('/{userId}/follow',      [FollowController::class, 'toggle']);
+        Route::delete('/{userId}/follow',    [FollowController::class, 'toggle']);
         Route::get('/{userId}/followers',    [FollowController::class, 'followers']);
         Route::get('/{userId}/following',    [FollowController::class, 'following']);
     });

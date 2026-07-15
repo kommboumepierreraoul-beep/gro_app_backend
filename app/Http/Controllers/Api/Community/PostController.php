@@ -49,7 +49,7 @@ class PostController extends Controller
             return response()->json(['success' => false, 'message' => 'Utilisateur non authentifié'], 401);
         }
 
-        $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+        $posts = Post::with(['author.profile', 'sharedPost.author.profile', 'moderation'])
             ->feed($user->id)
             ->paginate(15);
 
@@ -74,7 +74,7 @@ class PostController extends Controller
             $user = $request->user();
             $searchTerm = trim($query);
 
-            $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+            $posts = Post::with(['author.profile', 'sharedPost.author.profile', 'moderation'])
                 ->where(function ($q) use ($searchTerm) {
                     $q->where('content', 'LIKE', "%{$searchTerm}%")
                         ->orWhere('title', 'LIKE', "%{$searchTerm}%");
@@ -296,7 +296,7 @@ class PostController extends Controller
                 $moderationMessage = 'Publication créée, en cours de vérification manuelle.';
             }
 
-            $post->load(['author.profile', 'sharedPost.author', 'moderation']);
+            $post->load(['author.profile', 'sharedPost.author.profile', 'moderation']);
 
             return response()->json([
                 'success' => true,
@@ -320,7 +320,7 @@ class PostController extends Controller
     {
         $user = $request->user();
 
-        $post = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+        $post = Post::with(['author.profile', 'sharedPost.author.profile', 'moderation'])
             ->findOrFail($id);
 
         if (!$post->isVisible() && $post->user_id !== $user?->id) {
@@ -497,7 +497,7 @@ class PostController extends Controller
     {
         $user = $request->user();
 
-        $posts = Post::with(['author.profile', 'sharedPost.author', 'moderation'])
+        $posts = Post::with(['author.profile', 'sharedPost.author.profile', 'moderation'])
             ->where('user_id', $userId)
             ->whereHas('moderation', function ($query) {
                 $query->where('status', 'approved');
@@ -631,7 +631,7 @@ class PostController extends Controller
             'id' => $user->id,
             'firstname' => $user->firstname,
             'lastname' => $user->lastname,
-            'avatar' => $user->avatar,
+            'avatar' => $user->profile?->avatar_url ?? $user->profile?->avatar,
             'headline' => $user->profile?->headline,
             'role' => $user->role,
         ];

@@ -21,6 +21,6 @@ class DisputeEscalatedMail extends Mailable
     public function build()
     {
         return $this->subject('Litige escaladé - Intervention requise')
-                    ->markdown('emails.disputes.escalated');
+                    ->view('emails.disputes.escalated');
     }
 }

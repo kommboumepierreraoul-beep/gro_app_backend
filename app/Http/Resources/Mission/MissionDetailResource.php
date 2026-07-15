@@ -31,7 +31,7 @@ class MissionDetailResource extends JsonResource
                 'name'          => $this->author->name,
                 'firstname'     => $this->author->firstname,
                 'lastname'      => $this->author->lastname,
-                'avatar'        => $this->author->avatar,
+                'avatar'        => $this->author->profile?->avatar_url ?? $this->author->profile?->avatar,
                 'rating'        => $this->author->mission_rating ?? null,
                 'reviews_count' => $this->author->mission_reviews_count ?? null,
             ]),
@@ -92,7 +92,7 @@ class MissionDetailResource extends JsonResource
                     'reviewer'  => [
                         'id'     => $r->reviewer->id,
                         'name'   => $r->reviewer->name,
-                        'avatar' => $r->reviewer->avatar,
+                        'avatar' => $r->reviewer->profile?->avatar_url ?? $r->reviewer->profile?->avatar,
                     ],
                     'created_at' => $r->created_at->toIso8601String(),
                 ])

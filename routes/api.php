@@ -93,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [OrderController::class, 'sellerOrders']);
         Route::put('/{order}/prepare', [OrderController::class, 'prepareOrder']);
         Route::put('/{order}/ship', [OrderController::class, 'shipOrder']);
+        Route::put('/{order}/delivery-position', [OrderController::class, 'updateDeliveryPosition']);
         Route::post('/{order}/confirm-delivery', [OrderController::class, 'confirmDelivery']);
     });
 
